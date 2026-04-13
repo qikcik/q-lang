@@ -1,0 +1,258 @@
+// QLang — Sokoban
+//
+// Turn-based puzzle: push all 3 boxes ($) onto goal tiles (.).
+// Controls: w/a/s/d = move, r = reset, q = quit.
+//
+// Feature showcase:
+//   struct          — State { board, px, py, boxes_done, moves }
+//   ptr<mut T>      — all moves mutate State via ptr<mut State>
+//   ptr<fn>         — move functions stored and called via function pointers
+//   array<T,N>      — flat 8×8 board as array<mut u8, 64>
+//   macro           — print_board!(sp) renders the board
+//   defer           — end-of-game message always prints
+//   while / break   — main game loop
+//   else if         — input dispatch + tile rendering
+//   unary minus     — negative deltas (-1)
+//   u8 / i32 / bool — mixed types, as<u8>() casts
+//   namespace       — State:: constructor
+//   char literals   — '#' '@' '$' etc. instead of magic numbers
+//   string concat   — "row1" "row2" ... to build the level layout
+
+// ── Tile constants ───────────────────────────────────────────────────────────
+//  0 = empty   1 = wall   2 = player   3 = box
+//  4 = goal    5 = box-on-goal          6 = player-on-goal
+
+// ── State struct ─────────────────────────────────────────────────────────────
+
+State := struct {
+    board     : array<mut u8, 64>;
+    px        : mut i32;
+    py        : mut i32;
+    boxes_done: mut i32;
+    moves     : mut i32;
+};
+
+// ── Namespace — level reset ──────────────────────────────────────────────────
+// Solvable level: push each box ($) right by 2 into its goal (.)
+//
+//   ########
+//   #      #
+//   #  @   #
+//   #  $ . #
+//   #  $ . #
+//   #  $ . #
+//   #      #
+//   ########
+
+State::reset := fn(s: ptr<mut State>) void {
+    // Level laid out as adjacent string literals → one array<u8,64>.
+    // Each char encodes the tile visually: '#'=wall ' '=empty '@'=player
+    // '$'=box '.'=goal '*'=box-on-goal
+    layout :=
+        "########"
+        "#      #"
+        "#  @   #"
+        "#  $ . #"
+        "#  $ . #"
+        "#  $ . #"
+        "#      #"
+        "########";
+
+    i : mut i32 = 0;
+    while (i < 64) {
+        ch := layout.[i];
+        if      (ch == '#') { s.*.board.[i] = 1; }
+        else if (ch == '@') { s.*.board.[i] = 2; }
+        else if (ch == '$') { s.*.board.[i] = 3; }
+        else if (ch == '.') { s.*.board.[i] = 4; }
+        else if (ch == '*') { s.*.board.[i] = 5; }
+        else                { s.*.board.[i] = 0; }
+        i = i + 1;
+    }
+
+    s.*.px         = 3;
+    s.*.py         = 2;
+    s.*.boxes_done = 0;
+    s.*.moves      = 0;
+};
+
+// ── printByte helper ─────────────────────────────────────────────────────────
+
+printByte := fn(b: u8) void {
+    ch : array<mut u8, 1> = { 0 };
+    ch.[0] = b;
+    ext::print(&ch, 1);
+};
+
+// ── print_board macro ────────────────────────────────────────────────────────
+// Usage: print_board!(sp)
+// Iterates the 64-cell board; emits tile char + newline every 8 cols.
+
+print_board := macro(sp : expr) {
+    $bi : mut u32 = 0;
+    while ($bi < 64) {
+        $tile := @sp.*.board.[$bi];
+        if ($tile == 1) { printByte('#'); }          // wall
+        else if ($tile == 2) { printByte('@'); }     // player
+        else if ($tile == 3) { printByte('$'); }     // box
+        else if ($tile == 4) { printByte('.'); }     // goal
+        else if ($tile == 5) { printByte('*'); }     // box on goal
+        else if ($tile == 6) { printByte('@'); }     // player on goal
+        else { printByte(' '); }                      // empty
+        $col := $bi - as<u32>($bi / 8) * 8;
+        if ($col == 7) { printByte('\n'); }           // newline at row end
+        $bi = $bi + 1;
+    }
+};
+
+// ── Move functions ───────────────────────────────────────────────────────────
+
+do_move := fn(s: ptr<mut State>, dx: i32, dy: i32) void {
+    nx := s.*.px + dx;
+    ny := s.*.py + dy;
+
+    // boundary check
+    if (nx < 0 || nx >= 8 || ny < 0 || ny >= 8) { return; }
+
+    ntile := as<i32>(s.*.board.[ny * 8 + nx]);
+
+    // wall → blocked
+    if (ntile == 1) { return; }
+
+    // box or box-on-goal → try to push
+    if (ntile == 3 || ntile == 5) {
+        bx := nx + dx;
+        by := ny + dy;
+        if (bx < 0 || bx >= 8 || by < 0 || by >= 8) { return; }
+        btile := as<i32>(s.*.board.[by * 8 + bx]);
+        if (btile != 0 && btile != 4) { return; }
+
+        if (ntile == 5) {
+            s.*.boxes_done = s.*.boxes_done - 1;
+        }
+        if (btile == 4) {
+            s.*.board.[by * 8 + bx] = 5;
+            s.*.boxes_done = s.*.boxes_done + 1;
+        } else {
+            s.*.board.[by * 8 + bx] = 3;
+        }
+    }
+
+    // vacate current cell
+    ptile := as<i32>(s.*.board.[s.*.py * 8 + s.*.px]);
+    if (ptile == 6) {
+        s.*.board.[s.*.py * 8 + s.*.px] = 4;
+    } else {
+        s.*.board.[s.*.py * 8 + s.*.px] = 0;
+    }
+
+    // place player on target
+    if (ntile == 4 || ntile == 5) {
+        s.*.board.[ny * 8 + nx] = 6;
+    } else {
+        s.*.board.[ny * 8 + nx] = 2;
+    }
+
+    s.*.px    = nx;
+    s.*.py    = ny;
+    s.*.moves = s.*.moves + 1;
+};
+
+move_up    := fn(s: ptr<mut State>) void { do_move(s, 0, -1); };
+move_down  := fn(s: ptr<mut State>) void { do_move(s, 0,  1); };
+move_left  := fn(s: ptr<mut State>) void { do_move(s, -1, 0); };
+move_right := fn(s: ptr<mut State>) void { do_move(s,  1, 0); };
+
+// ── Function-pointer dispatch table ─────────────────────────────────────────
+
+dispatch_dir := fn(s: ptr<mut State>, dir: i32) void {
+    fup    : ptr<fn(s: ptr<mut State>) void> = &move_up;
+    fdown  : ptr<fn(s: ptr<mut State>) void> = &move_down;
+    fleft  : ptr<fn(s: ptr<mut State>) void> = &move_left;
+    fright : ptr<fn(s: ptr<mut State>) void> = &move_right;
+    if (dir == 0) { fup.*(s);    }
+    else if (dir == 1) { fdown.*(s);  }
+    else if (dir == 2) { fleft.*(s);  }
+    else if (dir == 3) { fright.*(s); }
+};
+
+// ── printInt helper ──────────────────────────────────────────────────────────
+
+printInt := fn(n: i32) void {
+    hundreds := n / 100;
+    tens      := (n - hundreds * 100) / 10;
+    ones      := n - hundreds * 100 - tens * 10;
+    if (hundreds > 0) { printByte(as<u8>(48 + hundreds)); }
+    if (hundreds > 0 || tens > 0) { printByte(as<u8>(48 + tens)); }
+    printByte(as<u8>(48 + ones));
+};
+
+// ── main ─────────────────────────────────────────────────────────────────────
+
+main := fn() void {
+    state : State = State::default;
+    sp    : ptr<mut State> = &state;
+    State::reset(sp);
+
+    won : mut bool = false;
+    defer {
+        if (won) {
+            winMsg := "You solved it!\n";
+            ext::print(&winMsg, winMsg.size);
+        } else {
+            quitMsg := "Bye!\n";
+            ext::print(&quitMsg, quitMsg.size);
+        }
+        movLbl := "Moves: ";
+        ext::print(&movLbl, movLbl.size);
+        printInt(sp.*.moves);
+        printByte('\n');
+    };
+
+    banner := "=== SOKOBAN 8x8 ===";
+    ext::printLn(&banner, banner.size);
+
+    legend := "# wall  @ you  $ box  . goal  * done\n";
+    ext::print(&legend, legend.size);
+
+    helpMsg := "w/a/s/d = move  r = reset  q = quit\n\n";
+    ext::print(&helpMsg, helpMsg.size);
+
+    running : mut bool = true;
+    while (running) {
+        print_board!(sp);
+        printByte('\n');
+
+        movLbl2 := "Moves: ";
+        ext::print(&movLbl2, movLbl2.size);
+        printInt(sp.*.moves);
+        printByte('\n');
+
+        promptLbl := "Command: ";
+        ext::print(&promptLbl, promptLbl.size);
+
+        ibuf : array<mut u8, 4> = { 0, 0, 0, 0 };
+        n := ext::input(&ibuf, 4);
+
+        if (n == 0) {
+            running = false;
+        } else {
+            cmd := ibuf.[0];
+            if      (cmd == 'w') { dispatch_dir(sp, 0); }
+            else if (cmd == 's') { dispatch_dir(sp, 1); }
+            else if (cmd == 'a') { dispatch_dir(sp, 2); }
+            else if (cmd == 'd') { dispatch_dir(sp, 3); }
+            else if (cmd == 'r') {
+                State::reset(sp);
+                resetMsg := "Reset!\n";
+                ext::print(&resetMsg, resetMsg.size);
+            }
+            else if (cmd == 'q') { running = false; }
+
+            if (sp.*.boxes_done == 3) {
+                won     = true;
+                running = false;
+            }
+        }
+    }
+};

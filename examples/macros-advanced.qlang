@@ -1,0 +1,94 @@
+// QLang — Advanced Macros
+//
+// After Run:
+//   ASSERT FAILED: x > 100
+//   a=30 b=10
+//   c=2  d=1
+//   DONE
+//
+// Feature coverage:
+//   #param       — stringify: zamienia argument-wyrażenie na string literal
+//                  (użyteczne do diagnoz: "którą linię sprawdza assert?")
+//   $gensym      — unikalna nazwa zmiennej per rozwinięcie; brak kolizji przy
+//                  wielokrotnym wywołaniu w tej samej funkcji
+//   kompozycja   — makro wywołujące inne makro
+
+// ── assert!: klasyczny przykład użycia #stringify ─────────────────────────────
+// #cond zamienia token-argument na StringLiteral w czasie rozwijania makra.
+// $msg i $prefix są gensym'd — brak konfliktu przy wielu assert! w jednej funkcji.
+
+assert := macro(cond : expr) {
+    if (!(@cond)) {
+        $prefix := "ASSERT FAILED: ";
+        $msg    := #cond;
+        ext::print(&$prefix, $prefix.size);
+        ext::printLn(&$msg, $msg.size);
+    }
+};
+
+// ── swap!: $gensym eliminuje kolizje nazw ─────────────────────────────────────
+// $tmp dostaje unikalną nazwę w każdym rozwinięciu — nawet w tej samej funkcji.
+// Wywołanie swap!(a, b); swap!(c, d); generuje dwa różne $tmp: __mg_tmp_1, __mg_tmp_2.
+
+swap := macro(a : ident, b : ident) {
+    $tmp : i32 = @a;
+    @a = @b;
+    @b = $tmp;
+};
+
+// ── print_pair!: makro kompozycji ─────────────────────────────────────────────
+// Wywołuje assert! wewnętrznie — makro może wywoływać inne makro.
+
+print_pair := macro(name_a : ident, name_b : ident) {
+    $sa := #name_a;
+    $sb := #name_b;
+    ext::print(&$sa, $sa.size);
+    $eq := "=";
+    ext::print(&$eq, $eq.size);
+    // $val_a i $val_b gensym'd, każde wywołanie print_pair! dostaje unikalne
+    $val_a : i32 = @name_a;
+    $val_b : i32 = @name_b;
+    $hundreds_a := $val_a / 100;
+    $ones_a     := $val_a - $hundreds_a * 100;
+    $ch : array<mut u8, 1> = { 0 };
+    $ch.[0] = as<u8>(48 + $ones_a);
+    ext::print(&$ch, 1);
+    $sp := "  ";
+    ext::print(&$sp, $sp.size);
+    $sb2 := #name_b;
+    ext::print(&$sb2, $sb2.size);
+    $eq2 := "=";
+    ext::print(&$eq2, $eq2.size);
+    $hundreds_b := $val_b / 100;
+    $ones_b     := $val_b - $hundreds_b * 100;
+    $ch.[0] = as<u8>(48 + $ones_b);
+    ext::print(&$ch, 1);
+    $nl := "\n";
+    ext::print(&$nl, $nl.size);
+};
+
+// ── main ──────────────────────────────────────────────────────────────────────
+
+main := fn() void {
+    // assert! z #stringify — przechodzący warunek: cisza
+    assert!(1 + 1 == 2);
+
+    // assert! z #stringify — niespełniony warunek: drukuje "x > 100"
+    x : i32 = 5;
+    assert!(x > 100);
+
+    // swap! z $gensym — dwa wywołania w tej samej funkcji, brak kolizji nazw
+    a : mut i32 = 10;
+    b : mut i32 = 30;
+    swap!(a, b);        // a=30, b=10; $tmp → __mg_tmp_1
+
+    c : mut i32 = 1;
+    d : mut i32 = 2;
+    swap!(c, d);        // c=2,  d=1;  $tmp → __mg_tmp_2  (inny niż powyżej!)
+
+    print_pair!(a, b);
+    print_pair!(c, d);
+
+    done := "DONE\n";
+    ext::print(&done, done.size);
+};

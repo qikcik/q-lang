@@ -1,0 +1,134 @@
+// QLang — Structs + Pointers
+//
+// After Run:
+//   Point after translate: (5, 7)
+//   Distance squared p1-p2: 50
+//   Stats: min=-3 max=8 count=4
+//
+// Feature coverage:
+//   struct         — Point { x, y } i Stats { min_x, max_x, count }
+//   ptr<mut S>     — mutacja pól przez wskaźnik (p.*.x = ...)
+//   namespace fn   — Point::translate, Stats::update, Stats::init
+//   struct param   — Stats::update(s, p: Point) — struct as read-only arg
+//   else if        — warunkowa aktualizacja min/max
+
+// ── Point ─────────────────────────────────────────────────────────────────────
+
+Point := struct {
+    x : mut i32;
+    y : mut i32;
+};
+
+Point::set := fn(p: ptr<mut Point>, x: i32, y: i32) void {
+    p.*.x = x;
+    p.*.y = y;
+};
+
+Point::translate := fn(p: ptr<mut Point>, dx: i32, dy: i32) void {
+    p.*.x = p.*.x + dx;
+    p.*.y = p.*.y + dy;
+};
+
+// Odległość kwadratowa między dwoma punktami (bez sqrt — brak f64 root)
+Point::distSq := fn(a: Point, b: Point) i32 {
+    dx := b.x - a.x;
+    dy := b.y - a.y;
+    return dx * dx + dy * dy;
+};
+
+// ── Stats: śledzi min/max/count wartości x ────────────────────────────────────
+
+Stats := struct {
+    min_x : mut i32;
+    max_x : mut i32;
+    count : mut i32;
+};
+
+Stats::init := fn(s: ptr<mut Stats>) void {
+    s.*.min_x =  9999;
+    s.*.max_x = -9999;
+    s.*.count = 0;
+};
+
+Stats::update := fn(s: ptr<mut Stats>, p: Point) void {
+    if (p.x < s.*.min_x)      { s.*.min_x = p.x; }
+    else if (p.x > s.*.max_x) { s.*.max_x = p.x; }
+    s.*.count = s.*.count + 1;
+};
+
+// ── Print helpers ─────────────────────────────────────────────────────────────
+
+printByte := fn(b: u8) void {
+    ch : array<mut u8, 1> = { 0 };
+    ch.[0] = b;
+    ext::print(&ch, 1);
+};
+
+printInt := fn(n: i32) void {
+    v : mut i32 = n;
+    if (v < 0) { printByte('-'); v = -v; }
+    hundreds := v / 100;
+    tens      := (v - hundreds * 100) / 10;
+    ones      := v - hundreds * 100 - tens * 10;
+    if (hundreds > 0)              { printByte(as<u8>(48 + hundreds)); }
+    if (hundreds > 0 || tens > 0) { printByte(as<u8>(48 + tens)); }
+    printByte(as<u8>(48 + ones));
+};
+
+// ── main ──────────────────────────────────────────────────────────────────────
+
+main := fn() void {
+    // Tworzenie i mutacja Point przez ptr<mut Point>
+    p1 : Point = Point::default;
+    sp1 : ptr<mut Point> = &p1;
+    Point::set(sp1, 2, 3);
+    Point::translate(sp1, 3, 4);    // (2+3, 3+4) = (5, 7)
+
+    lbl1 := "Point after translate: (";
+    ext::print(&lbl1, lbl1.size);
+    printInt(p1.x); printByte(','); printByte(' ');
+    printInt(p1.y); printByte(')'); printByte('\n');
+
+    // Odległość kwadratowa p1=(5,7) i p2=(0,2): dx=5 dy=5 → 50
+    p2 : Point = Point::default;
+    sp2 : ptr<mut Point> = &p2;
+    Point::set(sp2, 0, 2);
+    dsq := Point::distSq(p1, p2);
+    lbl2 := "Distance squared p1-p2: ";
+    ext::print(&lbl2, lbl2.size);
+    printInt(dsq); printByte('\n');
+
+    // Stats — śledź x-wartości czterech punktów
+    stats : Stats = Stats::default;
+    ss : ptr<mut Stats> = &stats;
+    Stats::init(ss);
+
+    pa : Point = Point::default;
+    pb : Point = Point::default;
+    pc : Point = Point::default;
+    pd : Point = Point::default;
+    spa : ptr<mut Point> = &pa;
+    spb : ptr<mut Point> = &pb;
+    spc : ptr<mut Point> = &pc;
+    spd : ptr<mut Point> = &pd;
+    Point::set(spa,  2, 0);
+    Point::set(spb, -3, 0);
+    Point::set(spc,  8, 0);
+    Point::set(spd,  1, 0);
+
+    Stats::update(ss, pa);
+    Stats::update(ss, pb);
+    Stats::update(ss, pc);
+    Stats::update(ss, pd);
+
+    lbl3 := "Stats: min=";
+    ext::print(&lbl3, lbl3.size);
+    printInt(stats.min_x);
+    lbl4 := " max=";
+    ext::print(&lbl4, lbl4.size);
+    printInt(stats.max_x);
+    lbl5 := " count=";
+    ext::print(&lbl5, lbl5.size);
+    printInt(stats.count);
+    printByte('\n');
+};

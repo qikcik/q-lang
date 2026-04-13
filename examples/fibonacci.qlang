@@ -1,0 +1,30 @@
+fib_rec := fn(n: i32) i32 {
+    if (n <= 1) {
+        return n;
+    } else {
+        return fib_rec(n - 1) + fib_rec(n - 2);
+    }
+};
+
+fib_iter := fn(n: i32) i32 {
+    if (n <= 1) {
+        return n;
+    }
+
+    a : mut i32 = 0;
+    b : mut i32 = 1;
+    i : mut i32 = 2;
+
+    while (i <= n) {
+        temp := a + b;
+        a = b;
+        b = temp;
+        i = i + 1;
+    }
+
+    return b;
+};
+
+main := fn() i32 {
+    return fib_rec(30);
+};

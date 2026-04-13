@@ -1,0 +1,94 @@
+// QLang — defer
+//
+// After Run:
+//   === error path ===
+//   Opening resource...
+//   Error: bailing out early
+//   Closing resource.    ← defer runs even on early return!
+//   --- ---
+//   === success path ===
+//   Opening resource...
+//   Processing complete.
+//   Closing resource.    ← defer runs on normal exit too
+//
+// Feature coverage:
+//   defer { block };  — blok wykonywany przy wyjściu z bieżącego bloku `{}` (jak Zig)
+//   defer + early return  — gwarancja cleanup niezależnie od ścieżki
+//   wiele instrukcji w defer — blok może zawierać dowolne stmt
+
+// ── processResource: defer zapewnia zamknięcie zasobu w każdym przypadku ─────
+
+processResource := fn(ok: bool) void {
+    opening := "Opening resource...\n";
+    ext::print(&opening, opening.size);
+
+    // defer odpala przy wyjściu z bieżącego bloku {} —
+    // zarówno przy wczesnym return, jak i przy naturalnym końcu bloku.
+    defer {
+        closing := "Closing resource.\n";
+        ext::print(&closing, closing.size);
+    };
+
+    if (!ok) {
+        errMsg := "Error: bailing out early\n";
+        ext::print(&errMsg, errMsg.size);
+        return;   // <── wczesny return; defer MIMO TO się wykona
+    }
+
+    done := "Processing complete.\n";
+    ext::print(&done, done.size);
+};
+
+// ── countedWork: defer do podsumowania wyniku ─────────────────────────────────
+
+countedWork := fn(n: i32) void {
+    result : mut i32 = 0;
+
+    defer {
+        sumLbl := "Sum 1..n = ";
+        ext::print(&sumLbl, sumLbl.size);
+        // printInt pomocnicza (inline — defer widzi zmienne z zewnętrznego scope)
+        hundreds := result / 100;
+        tens      := (result - hundreds * 100) / 10;
+        ones      := result - hundreds * 100 - tens * 10;
+        ch : array<mut u8, 1> = { 0 };
+        if (hundreds > 0) {
+            ch.[0] = as<u8>(48 + hundreds);
+            ext::print(&ch, 1);
+        }
+        if (hundreds > 0 || tens > 0) {
+            ch.[0] = as<u8>(48 + tens);
+            ext::print(&ch, 1);
+        }
+        ch.[0] = as<u8>(48 + ones);
+        ext::print(&ch, 1);
+        nl : array<u8, 1> = { 10 };
+        ext::print(&nl, 1);
+    };
+
+    i : mut i32 = 1;
+    while (i <= n) {
+        result = result + i;
+        i = i + 1;
+    }
+};
+
+// ── main ─────────────────────────────────────────────────────────────────────
+
+main := fn() void {
+    a := "=== error path ===\n";
+    ext::print(&a, a.size);
+    processResource(false);
+
+    sep := "--- ---\n";
+    ext::print(&sep, sep.size);
+
+    b := "=== success path ===\n";
+    ext::print(&b, b.size);
+    processResource(true);
+
+    sep2 := "--- ---\n";
+    ext::print(&sep2, sep2.size);
+
+    countedWork(10);
+};

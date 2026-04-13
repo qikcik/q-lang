@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QLang IDE</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #1e1e2e;
+      --surface:  #313244;
+      --border:   #45475a;
+      --text:     #cdd6f4;
+      --muted:    #6c7086;
+      --accent:   #89b4fa;
+      --green:    #a6e3a1;
+      --red:      #f38ba8;
+      --yellow:   #f9e2af;
+      --font-mono: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      height: 100dvh;
+      overflow: hidden;
+    }
+
+    /* ── Header ──────────────────────────────────────────────────────────── */
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 16px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+
+    header h1 {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--accent);
+    }
+
+    button {
+      background: var(--border);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 5px 14px;
+      font: inherit;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    button:hover { background: var(--accent); color: var(--bg); }
+    button#btn-run { background: var(--green); color: var(--bg); }
+    button#btn-run:hover { filter: brightness(1.1); }
+    button#btn-debug { background: var(--yellow); color: var(--bg); }
+    button#btn-debug:hover { filter: brightness(1.1); }
+    button#btn-debug.dbg-active { background: var(--red); }
+    button#btn-stop { background: var(--red); color: var(--bg); }
+    button#btn-stop:hover { filter: brightness(1.1); }
+    button#btn-stop:disabled { background: var(--border); color: var(--muted); opacity: 0.5; cursor: not-allowed; filter: none; }
+    button#btn-clear { background: transparent; color: var(--muted); }
+    button#btn-clear:hover { background: var(--border); color: var(--text); }
+
+    /* ── Example picker ─────────────────────────────────────────────────── */
+    .example-picker {
+      position: relative;
+    }
+    #example-list {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      list-style: none;
+      margin: 2px 0 0;
+      padding: 4px 0;
+      min-width: 160px;
+      z-index: 100;
+    }
+    #example-list li {
+      padding: 6px 14px;
+      cursor: pointer;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    #example-list li:hover {
+      background: var(--accent);
+      color: var(--bg);
+    }
+
+    /* ── Main layout: editor | outputs ───────────────────────────────────── */
+    main {
+      display: grid;
+      grid-template-columns: 1fr 4px 1fr 4px 1fr;
+      gap: 0;
+      overflow: hidden;
+      min-height: 0;
+    }
+
+    .pane {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border-right: 1px solid var(--border);
+    }
+    .pane:last-child { border-right: none; }
+
+    .pane-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      padding: 4px 12px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+    }
+    .pane-label::after {
+      content: '\25BE';
+      font-size: 10px;
+      color: var(--muted);
+      transition: transform 0.15s;
+    }
+    .pane-label.collapsed::after { transform: rotate(-90deg); }
+    .pane-body-hidden { display: none !important; }
+    .pane-collapsed { flex: 0 0 auto !important; min-height: 0 !important; }
+
+    pre, code { font: inherit; }
+
+    /* ── SourceView WebComponent (<qlang-source-view>) ──────────────────── */
+    qlang-source-view {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+      font: inherit;
+    }
+    qlang-source-view.sv-readonly {
+      flex: unset;
+      overflow: visible;
+    }
+    .sv-gutter {
+      flex-shrink: 0;
+      padding: 12px 8px 12px 22px;
+      line-height: 1.6;
+      color: var(--muted);
+      background: var(--bg);
+      border-right: 1px solid var(--border);
+      text-align: right;
+      user-select: none;
+      overflow: hidden;
+      white-space: pre;
+      min-width: 2.4em;
+      font-variant-numeric: tabular-nums;
+      cursor: pointer;
+      position: relative;
+    }
+    .sv-gutter span {
+      display: block;
+      position: relative;
+      padding-right: 2px;
+    }
+    .sv-gutter span.bp-active::before {
+      content: '';
+      position: absolute;
+      left: -18px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--red);
+    }
+    .sv-body {
+      position: relative;
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+    .sv-readonly .sv-body {
+      overflow: visible;
+      min-height: unset;
+      flex: unset;
+    }
+    #editor {
+      position: absolute;
+      inset: 0;
+      padding: 12px;
+      line-height: 1.6;
+      tab-size: 4;
+      white-space: pre;
+      overflow: auto;
+      outline: none;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 0;
+    }
+
+    .sv-pre {
+      margin: 0;
+      padding: 6px 12px;
+      font: inherit;
+      white-space: pre;
+    }
+    .sv-overlay {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 2;
+    }
+    .sv-hl-rect {
+      position: absolute;
+      background: rgba(137, 180, 250, 0.18);
+      border-radius: 2px;
+      pointer-events: none;
+    }
+    .sv-hl-active {
+      position: absolute;
+      background: rgba(137, 180, 250, 0.32);
+      border-bottom: 2px solid rgba(137, 180, 250, 0.8);
+      border-radius: 2px;
+      pointer-events: none;
+    }
+    .sv-hl-dimmed {
+      position: absolute;
+      background: rgba(137, 180, 250, 0.10);
+      border-radius: 2px;
+      pointer-events: none;
+    }
+
+    /* ── Macro lens layer ──────────────────────────────────────────────────── */
+    #macro-lens-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 2;
+      overflow: hidden;
+    }
+
+    .macro-lens-btn {
+      position: absolute;
+      pointer-events: auto;
+      cursor: pointer;
+      font-size: 11px;
+      line-height: 1;
+      padding: 1px 5px;
+      border-radius: 3px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--muted);
+      user-select: none;
+      transition: background 0.1s, color 0.1s;
+    }
+    .macro-lens-btn:hover,
+    .macro-lens-btn.active { background: var(--accent); color: #1e1e2e; border-color: var(--accent); }
+
+    /* ── Macro panels row ──────────────────────────────────────────────────── */
+    .macro-panels-row {
+      display: flex;
+      gap: 4px;
+      overflow-x: auto;
+      max-height: 280px;
+      border-top: 1px solid var(--border);
+    }
+    .macro-panel {
+      flex: 1 1 300px;
+      min-width: 200px;
+      display: flex;
+      flex-direction: column;
+      background: #181825;
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .macro-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 3px 10px;
+      background: #1e1e2e;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .macro-panel-title {
+      font-size: 11px;
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .macro-panel-close {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 13px;
+      padding: 0 2px;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+    .macro-panel-close:hover { color: var(--red); }
+    .macro-panel-body {
+      flex: 1;
+      overflow: auto;
+      padding: 0;
+      margin: 0;
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--text);
+      position: relative;
+    }
+    .hl-keyword { color: #cba6f7; }
+    .hl-type    { color: #89dceb; }
+    .hl-bool,
+    .hl-number  { color: #fab387; }
+    .hl-string  { color: #a6e3a1; }
+    .hl-comment { color: var(--muted); font-style: italic; }
+    .hl-op      { color: var(--accent); }
+    .hl-punct   { color: #a6adc8; }
+    .hl-ident   { color: var(--text); }
+    .hl-error   { text-decoration: underline wavy #f38ba8; text-decoration-skip-ink: none; }
+
+    /* ── Autocomplete popup ──────────────────────────────────────────────── */
+    #ac-popup {
+      display: none;
+      position: fixed;
+      z-index: 200;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      max-height: 180px;
+      min-width: 130px;
+      overflow-y: auto;
+      font: inherit;
+      font-size: 12px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    }
+    .ac-item {
+      padding: 3px 12px;
+      cursor: pointer;
+      color: var(--text);
+      white-space: nowrap;
+    }
+    .ac-item:hover { background: var(--border); }
+    .ac-sel { background: var(--accent) !important; color: var(--bg); }
+    .ac-type { margin-left: 8px; font-size: 11px; opacity: 0.6; }
+
+    /* ── Type hint tooltip ───────────────────────────────────────────────── */
+    #type-tooltip {
+      display: none;
+      position: fixed;
+      z-index: 300;
+      background: #24273a;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 3px 10px;
+      font-size: 12px;
+      color: #89dceb;
+      pointer-events: none;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+      white-space: nowrap;
+    }
+
+    /* ── Right panel: WAT + console + errors stacked ─────────────────────── */
+    .right-pane {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .sub-pane {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border-bottom: 1px solid var(--border);
+      flex: 1;
+      min-height: 30px;
+    }
+    .sub-pane:last-child { border-bottom: none; }
+    .sub-pane.pane-collapsed { flex: 0 0 auto; min-height: 0; }
+
+    .sub-pane pre {
+      flex: 1;
+      overflow: auto;
+      padding: 10px 12px;
+      white-space: pre;
+      line-height: 1.5;
+      resize: none;
+    }
+
+    #out-console { color: var(--green); }
+    #out-errors  { color: var(--red); white-space: normal; line-height: 1.4; }
+
+    /* ── Console: flex column so stdin row sits below output ───────────── */
+    qlang-console {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      overflow: hidden;
+    }
+    qlang-console > pre { flex: 1; }
+
+    .console-stdin {
+      border-top: 1px solid var(--border);
+      padding: 5px 8px;
+      display: flex;
+      gap: 5px;
+      align-items: center;
+    }
+    .console-stdin-input {
+      flex: 1;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      font-family: var(--font-mono);
+      font-size: 0.85em;
+      padding: 3px 8px;
+      outline: none;
+      min-width: 0;
+    }
+    .console-stdin-input:focus         { border-color: var(--accent); }
+    .console-stdin-input:disabled      { color: var(--muted); cursor: not-allowed; }
+    .console-stdin-input::placeholder  { color: var(--muted); font-style: italic; }
+    .console-stdin-btn {
+      padding: 3px 9px;
+      font-size: 0.82em;
+      min-width: 28px;
+    }
+    .console-stdin-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    /* Clickable per-error lines in the errors panel */
+    #out-errors .err-line {
+      display: block;
+      border-radius: 3px;
+      padding: 1px 3px;
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    #out-errors .err-line:hover { background: rgba(243,139,168,0.15); text-decoration: underline; }
+
+    /* ── Nav-bar (canonical-ref chain navigation) ───────────────────────────── */
+    #nav-bar {
+      display: none;
+      position: fixed;
+      bottom: 18px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--surface1);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 4px 12px;
+      gap: 6px;
+      align-items: center;
+      font-size: 12px;
+      z-index: 1000;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+      white-space: nowrap;
+    }
+    #nav-bar.visible { display: flex; }
+    #nav-bar button {
+      background: none;
+      border: none;
+      color: var(--fg);
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    #nav-bar button:hover { background: var(--surface2); }
+    #nav-bar button:disabled { opacity: 0.35; cursor: default; }
+    #nav-label { color: var(--subtext0); min-width: 80px; text-align: center; }
+
+    /* TypeErrorNode in AST tree — red accent */
+    .ast-TypeErrorNode > summary { color: var(--red); }
+
+    /* ── WAT Explorer ────────────────────────────────────────────────────────── */
+    .wat-pane { background: var(--bg); }
+
+    .wat-scroll {
+      flex: 1;
+      overflow: auto;
+      padding: 10px 12px;
+    }
+
+    .wat-root {
+      line-height: 1.6;
+      font-size: 12px;
+    }
+
+    .wat-root details {
+      padding-left: 16px;
+      border-left: 1px solid var(--border);
+      margin: 0;
+    }
+    .wat-root > details {
+      border-left: none;
+      padding-left: 0;
+    }
+
+    .wat-root summary {
+      cursor: pointer;
+      padding: 1px 4px;
+      border-radius: 3px;
+      user-select: none;
+      list-style: none;
+      white-space: pre;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .wat-root summary::-webkit-details-marker { display: none; }
+    .wat-root details[open]       > summary::before { content: '▾  '; color: var(--muted); }
+    .wat-root details:not([open]) > summary::before { content: '▸  '; color: var(--muted); }
+    .wat-root details[data-leaf]  > summary::before { content: '   '; }
+    .wat-root summary:hover { background: var(--surface); }
+
+    .wat-line {
+      white-space: pre;
+      padding: 1px 4px;
+      border-radius: 2px;
+      display: block;
+    }
+    .wat-line:hover { background: var(--surface); }
+
+    /* WAT highlight on bidirectional selection */
+    .wat-highlight { background: rgba(137,180,250,0.15) !important; outline: 1px solid var(--accent); border-radius: 3px; }
+    .wat-highlight > summary { background: rgba(137,180,250,0.15) !important; outline: 1px solid var(--accent); border-radius: 3px; }
+
+    /* WAT syntax colouring */
+    .wk  { color: #cba6f7; }   /* keyword: func, module, import, export, if, loop, block, call */
+    .wt  { color: #89dceb; }   /* type: i32 f32 i64 f64 funcref */
+    .wi  { color: var(--accent); }  /* instruction: i32.add, local.get, … */
+    .wn  { color: #fab387; }   /* number literal */
+    .ws  { color: #a6e3a1; }   /* string literal */
+    .wr  { color: #f5c2e7; }   /* $ref: $name */
+    .wc  { color: var(--muted); font-style: italic; } /* ;; comment */
+
+    /* ── AST panel ──────────────────────────────────────────────────────────── */
+    .ast-pane { display: flex; flex-direction: column; background: var(--bg); overflow: hidden; }
+
+    .ast-scroll {
+      flex: 1;
+      overflow: auto;
+      padding: 10px 12px;
+    }
+
+    .ast-root {
+      line-height: 1.5;
+    }
+
+    .ast-root details {
+      padding-left: 16px;
+      border-left: 1px solid var(--border);
+      margin: 1px 0;
+    }
+
+    .ast-root > details {
+      border-left: none;
+      padding-left: 0;
+    }
+
+    .ast-root summary {
+      cursor: pointer;
+      padding: 2px 4px;
+      border-radius: 3px;
+      user-select: none;
+      list-style: none;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .ast-root summary::-webkit-details-marker { display: none; }
+
+    .ast-root details[open]      > summary::before { content: '\25BE  '; color: var(--muted); }
+    .ast-root details:not([open]) > summary::before { content: '\25B8  '; color: var(--muted); }
+    .ast-root details[data-leaf]  > summary::before { content: '   '; }
+
+    .ast-root summary:hover { background: var(--surface); }
+
+    .ast-kind  { color: var(--accent); font-weight: 600; font-size: 12px; }
+    .ast-label { color: var(--text);   font-size: 12px; }
+    .ast-key   { color: var(--yellow); font-size: 11px; }
+
+    .ast-highlight > summary {
+      background: rgba(137,180,250,0.15);
+      outline: 1px solid var(--accent);
+      border-radius: 3px;
+    }
+
+    /* Parent-statement highlight (different accent — amber) */
+    .ast-stmt-highlight > summary {
+      background: rgba(249,226,175,0.10);
+      outline: 1px solid var(--yellow);
+      border-radius: 3px;
+    }
+
+    #ast-status { margin-left: auto; color: var(--yellow); font-size: 11px; }
+
+    /* ── Bytecode panel ─────────────────────────────────────────────── */
+
+    /* ── Resize handles ──────────────────────────────────────────────── */
+    .col-handle {
+      width: 4px;
+      cursor: col-resize;
+      background: transparent;
+      transition: background 0.12s;
+    }
+    .col-handle:hover, .col-handle.active { background: var(--accent); }
+
+    .row-handle {
+      height: 4px;
+      cursor: row-resize;
+      background: transparent;
+      flex-shrink: 0;
+      position: relative;
+      z-index: 10;
+      transition: background 0.12s;
+    }
+    .row-handle:hover, .row-handle.active { background: var(--accent); }
+
+    /* While a row or column resize is in progress, prevent pane content from
+       stealing pointer events (scrollbar corners, overflow: auto grips, etc.) */
+    body.resizing .sub-pane > *:not(.pane-label),
+    body.resizing .sub-pane > .pane-label ~ * { pointer-events: none; }
+
+    /* ── Drag & drop ─────────────────────────────────────────────────── */
+    .sub-pane > .pane-label[draggable="true"] { cursor: grab; }
+    .sub-pane > .pane-label[draggable="true"]:active { cursor: grabbing; }
+    .sub-pane.drag-over > .pane-label { background: var(--accent) !important; color: var(--bg); }
+    .sub-pane.dragging { opacity: 0.4; }
+
+    .bytecode-scroll {
+      flex: 1;
+      overflow: auto;
+      padding: 8px 12px;
+      font-size: 11.5px;
+      line-height: 1.55;
+    }
+
+    .bc-row {
+      display: flex;
+      gap: 12px;
+      white-space: pre;
+      padding: 1px 2px;
+      border-radius: 2px;
+    }
+    .bc-row:hover { background: var(--surface); }
+
+    .bc-addr { color: var(--muted); user-select: none; min-width: 4ch; }
+    .bc-hex  { color: var(--text); flex: 1; display: flex; flex-wrap: wrap; gap: 0 6px; }
+
+    .bc-byte { border-radius: 2px; padding: 0 1px; cursor: pointer; }
+    .bc-byte:hover { background: var(--surface); }
+
+    /* Byte role colors */
+    .bc-magic   { color: #cba6f7; }
+    .bc-sec-id  { color: #f9e2af; font-weight: bold; }
+    .bc-sec-sz  { color: #a6adc8; }
+    .bc-type    { color: #94e2d5; }
+    .bc-opcode  { color: #89b4fa; }
+    .bc-operand { color: #bac2de; }
+    .bc-end     { color: #6c7086; }
+    .bc-string  { color: #a6e3a1; }
+    .bc-count   { color: #fab387; }
+
+    /* Highlight on bidirectional selection */
+    .bc-highlight { background: rgba(137,180,250,0.22) !important; outline: 1px solid var(--accent); border-radius: 2px; }
+    /* Stale indicator for WAT / bytecode panels after live-compile */
+    [data-stale] { opacity: 0.5; }
+
+    /* ── Debugger ────────────────────────────────────────────────────────── */
+    .debugger-scroll {
+      flex: 1;
+      overflow: auto;
+      padding: 6px 10px;
+      font-size: 11.5px;
+    }
+    .dbg-toolbar {
+      display: flex;
+      gap: 6px;
+      padding: 4px 0 8px;
+    }
+    .dbg-toolbar button {
+      font-size: 11px;
+      padding: 3px 10px;
+    }
+    .dbg-section {
+      margin-bottom: 8px;
+    }
+    .dbg-heading {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      padding: 2px 0 4px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 3px;
+    }
+    .dbg-list {
+      font-size: 11.5px;
+      line-height: 1.55;
+    }
+    .dbg-row {
+      display: flex;
+      gap: 8px;
+      padding: 1px 4px;
+      border-radius: 2px;
+    }
+    .dbg-row:hover { background: var(--surface); }
+    .dbg-name  { color: var(--accent); min-width: 8ch; }
+    .dbg-type  { color: var(--muted); min-width: 5ch; }
+    .dbg-value { color: var(--green); }
+    .dbg-idx   { color: var(--muted); min-width: 3ch; text-align: right; }
+    .dbg-func  { color: var(--yellow); }
+
+    .dbg-canonical {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 2px;
+      margin-top: 4px;
+      font-size: 10.5px;
+      min-height: 18px;
+    }
+    .dbg-crumb {
+      color: var(--accent);
+      cursor: pointer;
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+    .dbg-crumb:hover { background: var(--surface); }
+    .dbg-crumb.dbg-crumb-active { color: var(--fg); font-weight: 600; }
+    .dbg-crumb-sep { color: var(--muted); padding: 0 1px; }
+    .dbg-crumb-range { color: var(--muted); font-size: 9.5px; }
+
+    /* Debug highlight for current execution line */
+    .dbg-current-line { background: rgba(249,226,175,0.12) !important; }
+    .dbg-breakpoint   { position: relative; }
+    .dbg-breakpoint::before {
+      content: '●';
+      color: var(--red);
+      position: absolute;
+      left: -14px;
+      font-size: 10px;
+    }
+
+    /* ── Status bar ──────────────────────────────────────────────────────── */
+
+    /* ── Lang docs markdown ──────────────────────────────────────────────── */
+    .lang-docs-scroll {
+      overflow: auto;
+      padding: 12px 16px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--text);
+    }
+    .lang-docs-scroll h1 { font-size: 18px; color: var(--accent); margin: 0 0 8px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+    .lang-docs-scroll h2 { font-size: 15px; color: var(--accent); margin: 16px 0 6px; border-bottom: 1px solid var(--border); padding-bottom: 3px; }
+    .lang-docs-scroll h3 { font-size: 13px; color: var(--yellow); margin: 12px 0 4px; }
+    .lang-docs-scroll p { margin: 4px 0; }
+    .lang-docs-scroll ul, .lang-docs-scroll ol { margin: 4px 0 4px 20px; }
+    .lang-docs-scroll li { margin: 2px 0; }
+    .lang-docs-scroll code { background: var(--surface); padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+    .lang-docs-scroll pre { background: var(--surface); padding: 8px 10px; border-radius: 4px; margin: 6px 0; overflow-x: auto; font-size: 12px; line-height: 1.5; }
+    .lang-docs-scroll pre code { background: none; padding: 0; }
+    .lang-docs-scroll blockquote { border-left: 3px solid var(--accent); padding: 4px 12px; margin: 6px 0; color: var(--muted); }
+    .lang-docs-scroll table { border-collapse: collapse; margin: 6px 0; width: 100%; }
+    .lang-docs-scroll th, .lang-docs-scroll td { border: 1px solid var(--border); padding: 4px 8px; font-size: 12px; }
+    .lang-docs-scroll th { background: var(--surface); color: var(--accent); }
+    .lang-docs-scroll hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+    .lang-docs-scroll .doc-section-title { cursor: pointer; user-select: none; }
+    .lang-docs-scroll .doc-section-title::before { content: '▸ '; color: var(--muted); }
+    .lang-docs-scroll .doc-section-title.open::before { content: '▾ '; }
+
+    footer {
+      background: var(--accent);
+      color: var(--bg);
+      padding: 2px 12px;
+      font-size: 11px;
+      display: flex;
+      gap: 16px;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>QLang IDE</h1>
+  <div class="example-picker">
+    <button id="btn-load-example">Load example ▾</button>
+    <ul id="example-list" hidden></ul>
+  </div>  <button id="btn-ide-tests" onclick="window.open('../tests/smoke.html','_blank')">IDE tests</button>  <qlang-toolbar style="margin-left:auto">
+    <button id="btn-compile" data-action="compile">Compile</button>
+    <button id="btn-run" data-action="run">▶ Run</button>
+    <button id="btn-debug" data-action="debug">⬤ Debug</button>
+    <button id="btn-stop" disabled>⏹ Stop</button>
+    <button id="btn-clear" data-action="clear">Clear</button>
+  </qlang-toolbar>
+</header>
+
+<main>
+  <!-- Left: source editor + lang docs -->
+  <div class="pane">
+    <qlang-pane data-view="source">
+      <div class="pane-label">Source</div>
+      <qlang-source-view id="main-sv" editable>
+        <div id="macro-lens-layer"></div>
+      </qlang-source-view>
+      <div id="macro-panels-row" class="macro-panels-row"></div>
+    </qlang-pane>
+
+    <div class="row-handle"></div>
+
+    <qlang-pane collapsed data-view="lang-docs">
+      <div class="pane-label collapsed">Lang Docs</div>
+      <div id="lang-docs" class="lang-docs-scroll pane-body-hidden"></div>
+    </qlang-pane>
+  </div>
+
+  <div class="col-handle"></div>
+
+  <!-- Middle: AST viewer (top) + Bytecode view (bottom) -->
+  <div class="pane ast-pane" data-drop-col>
+
+    <qlang-pane data-view="ast">
+      <div class="pane-label" draggable="true">AST <span id="ast-status"></span></div>
+      <div id="out-ast" class="ast-scroll"></div>
+    </qlang-pane>
+
+    <div class="row-handle"></div>
+
+    <qlang-pane data-view="bytecode">
+      <div class="pane-label" draggable="true">Bytecode</div>
+      <div id="out-bytecode" class="bytecode-scroll"></div>
+    </qlang-pane>
+
+    <div class="row-handle"></div>
+
+    <qlang-pane collapsed data-view="debugger">
+      <div class="pane-label collapsed" draggable="true">Debugger</div>
+      <div id="debugger-panel" class="debugger-scroll">
+        <div class="dbg-toolbar">
+          <button id="dbg-step" title="Step (one statement)">⏭ Step</button>
+          <button id="dbg-continue" title="Continue to breakpoint">▶ Continue</button>
+        </div>
+        <div class="dbg-section">
+          <div class="dbg-heading">Current Statement</div>
+          <pre id="dbg-instr"></pre>
+          <div id="dbg-canonical" class="dbg-canonical"></div>
+        </div>
+      </div>
+    </qlang-pane>
+
+  </div>
+
+  <div class="col-handle"></div>
+
+  <!-- Right: WAT Explorer + console + errors stacked -->
+  <div class="pane right-pane" data-drop-col style="min-width: 0;">
+
+    <qlang-pane data-view="wat">
+      <div class="pane-label" draggable="true">WAT Explorer</div>
+      <div id="out-wat" class="wat-scroll"><div class="wat-root" id="wat-root"></div></div>
+    </qlang-pane>
+
+    <div class="row-handle"></div>
+
+    <qlang-pane data-view="console">
+      <div class="pane-label" draggable="true">Console</div>
+      <qlang-console id="console-panel">
+        <pre id="out-console"></pre>
+      </qlang-console>
+    </qlang-pane>
+
+    <div class="row-handle"></div>
+
+    <qlang-pane data-view="errors">
+      <div class="pane-label" draggable="true">Errors</div>
+      <qlang-error-panel id="error-panel">
+        <pre id="out-errors"></pre>
+      </qlang-error-panel>
+    </qlang-pane>
+
+  </div>
+</main>
+
+<div id="nav-bar" role="toolbar" aria-label="Source navigation">
+  <button id="nav-prev" title="Previous (Alt+[)">&#9664;</button>
+  <span id="nav-label"></span>
+  <button id="nav-next" title="Next (Alt+])">&#9654;</button>
+  <button id="nav-close" title="Close">&#x2715;</button>
+</div>
+
+<footer>
+  <span>QLang Compiler</span>
+  <span>Lexer → Parser → TypeChecker → WatIR → WASM</span>
+</footer>
+
+<script type="module" src="./qlang-pane.js"></script>
+<script type="module" src="./qlang-error-panel.js"></script>
+<script type="module" src="./qlang-console.js"></script>
+<script type="module" src="./qlang-toolbar.js"></script>
+<script type="module" src="./layout.js"></script>
+<script type="module" src="./main.js"></script>
+<div id="type-tooltip"></div>
+
+</body>
+</html>

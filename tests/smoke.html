@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>QLang IDE — Browser Smoke Tests</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #1e1e2e; --surface: #313244; --border: #45475a;
+      --text: #cdd6f4; --muted: #6c7086; --accent: #89b4fa;
+      --green: #a6e3a1; --red: #f38ba8; --yellow: #f9e2af;
+      --font-mono: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    }
+    body {
+      background: var(--bg); color: var(--text); font-family: var(--font-mono);
+      font-size: 13px; padding: 12px;
+    }
+    #results { max-width: 800px; margin: 0 auto; }
+    h1 { color: var(--accent); font-size: 16px; margin-bottom: 12px; }
+    .pass { color: var(--green); }
+    .fail { color: var(--red); }
+    .suite-name { color: var(--yellow); margin-top: 12px; display: block; }
+    .test-line { display: block; padding: 1px 0; font-size: 12px; }
+    #summary {
+      margin-top: 16px; padding: 8px 12px; border-radius: 4px;
+      font-size: 14px; font-weight: 600;
+    }
+    #summary.all-pass { background: rgba(166,227,161,0.15); color: var(--green); }
+    #summary.has-fail { background: rgba(243,139,168,0.15); color: var(--red); }
+    /* Hide the IDE itself — we only need the DOM for testing */
+    #ide-container { position: absolute; left: -9999px; top: -9999px; width: 1200px; height: 800px; overflow: hidden; }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     Hidden IDE structure — replicates index.html DOM so main.js can boot.
+     Only element IDs and tag types matter; CSS is not needed for structural tests.
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<div id="ide-container">
+  <header>
+    <h1>QLang IDE</h1>
+    <button id="btn-compile">Compile</button>
+    <button id="btn-run">▶ Run</button>
+    <button id="btn-debug">⬤ Debug</button>
+    <button id="btn-stop" disabled>⏹ Stop</button>
+    <button id="btn-clear">Clear</button>
+  </header>
+  <main>
+    <div class="pane">
+      <qlang-pane data-view="source">
+        <div class="pane-label">Source</div>
+        <qlang-source-view id="main-sv" editable>
+          <div id="macro-lens-layer"></div>
+        </qlang-source-view>
+        <div id="macro-panels-row" class="macro-panels-row"></div>
+      </qlang-pane>
+      <div class="row-handle"></div>
+      <qlang-pane collapsed data-view="lang-docs">
+        <div class="pane-label collapsed">Lang Docs</div>
+        <div id="lang-docs" class="lang-docs-scroll pane-body-hidden"></div>
+      </qlang-pane>
+    </div>
+    <div class="col-handle"></div>
+    <div class="pane ast-pane" data-drop-col>
+      <qlang-pane data-view="ast">
+        <div class="pane-label" draggable="true">AST <span id="ast-status"></span></div>
+        <div id="out-ast" class="ast-scroll"></div>
+      </qlang-pane>
+      <div class="row-handle"></div>
+      <qlang-pane data-view="bytecode">
+        <div class="pane-label" draggable="true">Bytecode</div>
+        <div id="out-bytecode" class="bytecode-scroll"></div>
+      </qlang-pane>
+      <div class="row-handle"></div>
+      <qlang-pane collapsed data-view="debugger">
+        <div class="pane-label collapsed" draggable="true">Debugger</div>
+        <div id="debugger-panel" class="debugger-scroll">
+          <div class="dbg-toolbar">
+            <button id="dbg-step">⏭ Step</button>
+            <button id="dbg-continue">▶ Continue</button>
+          </div>
+          <div class="dbg-section">
+            <div class="dbg-heading">Current Statement</div>
+            <pre id="dbg-instr"></pre>
+            <div id="dbg-canonical" class="dbg-canonical"></div>
+          </div>
+        </div>
+      </qlang-pane>
+    </div>
+    <div class="col-handle"></div>
+    <div class="pane right-pane" data-drop-col>
+      <qlang-pane data-view="wat">
+        <div class="pane-label" draggable="true">WAT Explorer</div>
+        <div id="out-wat" class="wat-scroll"><div class="wat-root" id="wat-root"></div></div>
+      </qlang-pane>
+      <div class="row-handle"></div>
+      <qlang-pane data-view="console">
+        <div class="pane-label" draggable="true">Console</div>
+        <pre id="out-console"></pre>
+      </qlang-pane>
+      <div class="row-handle"></div>
+      <qlang-pane data-view="errors">
+        <div class="pane-label" draggable="true">Errors</div>
+        <pre id="out-errors"></pre>
+      </qlang-pane>
+    </div>
+  </main>
+  <div id="nav-bar" role="toolbar">
+    <button id="nav-prev">&#9664;</button>
+    <span id="nav-label"></span>
+    <button id="nav-next">&#9654;</button>
+    <button id="nav-close">&#x2715;</button>
+  </div>
+  <div id="type-tooltip"></div>
+</div>
+
+<!-- Results panel (visible) -->
+<div id="results">
+  <h1>QLang IDE — Browser Smoke Tests</h1>
+  <div id="test-output"></div>
+  <div id="summary"></div>
+</div>
+
+<!-- Load the real IDE entry point so all modules initialize against our DOM -->
+<script type="module" src="../ide/qlang-pane.js"></script>
+<script type="module" src="../ide/layout.js"></script>
+<script type="module">
+import '../ide/main.js';
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Mini test runner
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const output = document.getElementById('test-output');
+let passed = 0, failed = 0;
+
+function suiteHeader(name) {
+  const el = document.createElement('span');
+  el.className = 'suite-name';
+  el.textContent = '── ' + name + ' ──';
+  output.appendChild(el);
+}
+
+function assert(cond, label) {
+  const el = document.createElement('span');
+  el.className = 'test-line';
+  if (cond) {
+    el.innerHTML = '<span class="pass">✓</span> ' + label;
+    passed++;
+  } else {
+    el.innerHTML = '<span class="fail">✗</span> ' + label;
+    failed++;
+  }
+  output.appendChild(el);
+}
+
+function finish() {
+  const sum = document.getElementById('summary');
+  const total = passed + failed;
+  sum.textContent = `Tests: ${total}  ✓ ${passed}  ✗ ${failed}` +
+    (failed === 0 ? '  — All passed!' : `  — ${failed} FAILED`);
+  sum.className = failed === 0 ? 'all-pass' : 'has-fail';
+}
+
+// Wait for custom element upgrade + initial compile
+function waitForIDE() {
+  return new Promise(resolve => {
+    // main.js triggers a live compile via setTimeout(150ms debounce)
+    // Give it 500ms to settle
+    setTimeout(resolve, 600);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tests
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function runTests() {
+  await waitForIDE();
+
+  // ── 1. DOM structure ──────────────────────────────────────────────────────
+  suiteHeader('DOM structure');
+
+  const requiredIds = [
+    'editor', 'main-sv', 'btn-compile', 'btn-run', 'btn-debug', 'btn-stop', 'btn-clear',
+    'out-console', 'out-errors', 'out-ast', 'out-bytecode', 'wat-root',
+    'macro-lens-layer', 'macro-panels-row',
+    'debugger-panel', 'dbg-instr', 'dbg-step', 'dbg-continue',
+    'nav-bar', 'nav-prev', 'nav-next', 'nav-label', 'nav-close',
+    'ast-status', 'type-tooltip', 'lang-docs',
+  ];
+  for (const id of requiredIds) {
+    assert(document.getElementById(id) !== null, `#${id} exists`);
+  }
+
+  // ── 2. qlang-pane component ────────────────────────────────────────────────
+  suiteHeader('Web Component: qlang-pane');
+
+  const allPanes = document.querySelectorAll('qlang-pane');
+  assert(allPanes.length === 8, `8 qlang-pane elements (got ${allPanes.length})`);
+
+  for (const pane of allPanes) {
+    assert(pane.classList.contains('sub-pane'), `qlang-pane[${pane.dataset.view}] has .sub-pane`);
+    assert(pane.querySelector(':scope > .pane-label') !== null, `qlang-pane[${pane.dataset.view}] has .pane-label`);
+  }
+
+  const collapsedPanes = document.querySelectorAll('qlang-pane[collapsed]');
+  for (const pane of collapsedPanes) {
+    assert(pane.classList.contains('pane-collapsed'), `collapsed pane[${pane.dataset.view}] has .pane-collapsed`);
+    assert(typeof pane.toggleCollapse === 'function', `pane[${pane.dataset.view}] has toggleCollapse()`);
+    assert(pane.isCollapsed === true, `pane[${pane.dataset.view}].isCollapsed is true`);
+  }
+
+  // Test toggle on a non-collapsed pane
+  const astPane = document.querySelector('qlang-pane[data-view="ast"]');
+  assert(astPane.isCollapsed === false, 'ast pane starts expanded');
+  astPane.toggleCollapse();
+  assert(astPane.isCollapsed === true, 'ast pane collapsed after toggle');
+  astPane.toggleCollapse();
+  assert(astPane.isCollapsed === false, 'ast pane expanded after second toggle');
+
+  // ── 3. Web Component initialization ───────────────────────────────────────
+  suiteHeader('Web Component: qlang-source-view');
+
+  const sv = document.getElementById('main-sv');
+  assert(sv?.tagName?.toLowerCase() === 'qlang-source-view', 'main-sv is <qlang-source-view>');
+  assert(sv?.hasAttribute('editable'), 'main-sv has editable attr');
+  assert(typeof sv?.setText === 'function', 'sv.setText is a function');
+  assert(typeof sv?.getText === 'function', 'sv.getText is a function');
+  assert(typeof sv?.highlightRange === 'function', 'sv.highlightRange is a function');
+  assert(typeof sv?.clearHighlight === 'function', 'sv.clearHighlight is a function');
+  assert(typeof sv?.setBpLines === 'function', 'sv.setBpLines is a function');
+
+  const editorPre = document.getElementById('editor');
+  assert(editorPre !== null, '#editor pre created by component');
+  assert(editorPre?.contentEditable === 'true', '#editor is contentEditable');
+
+  // ── 3. Gutter exists ──────────────────────────────────────────────────────
+  const gutter = sv?.querySelector('.sv-gutter');
+  assert(gutter !== null, 'sv-gutter created');
+
+  // ── 4. setText + getText roundtrip ────────────────────────────────────────
+  suiteHeader('Source view: setText / getText');
+
+  sv.setText('x : i32 = 42;');
+  const got = sv.getText();
+  assert(got === 'x : i32 = 42;', `getText returns "${got}"`);
+
+  // ── 5. Gutter reflects line count ─────────────────────────────────────────
+  sv.setText('line1\nline2\nline3');
+  const gutterLines = gutter?.querySelectorAll('span')?.length ?? 0;
+  assert(gutterLines === 3, `gutter shows ${gutterLines} lines (expect 3)`);
+
+  // ── 6. Highlight range creates rects ──────────────────────────────────────
+  suiteHeader('Highlight overlay');
+
+  sv.setText('hello world');
+  sv.clearHighlight();
+  sv.highlightRange(0, 5);
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const overlay = sv.querySelector('.sv-overlay') || sv.querySelector('#src-overlay');
+  const rects = overlay?.querySelectorAll('.sv-hl-rect, .sv-hl-active, .sv-hl-dimmed') ?? [];
+  assert(rects.length > 0, `overlay has ${rects.length} highlight rect(s)`);
+
+  sv.clearHighlight();
+  const rectsAfter = overlay?.querySelectorAll('.sv-hl-rect, .sv-hl-active, .sv-hl-dimmed') ?? [];
+  assert(rectsAfter.length === 0, 'clearHighlight removes all rects');
+
+  // ── 7. Compile button produces output ─────────────────────────────────────
+  suiteHeader('Compile flow');
+
+  // Set source and click compile
+  sv.setText('main := fn() i32 { return 42; };');
+  // eslint-disable-next-line no-undef
+  editorPre.textContent = 'main := fn() i32 { return 42; };';
+  document.getElementById('btn-compile').click();
+
+  // Wait for synchronous compile
+  await new Promise(r => setTimeout(r, 100));
+
+  const astContent = document.getElementById('out-ast');
+  assert(astContent.children.length > 0, 'AST panel populated after compile');
+
+  const watRoot = document.getElementById('wat-root');
+  assert(watRoot.children.length > 0, 'WAT panel populated after compile');
+
+  const bytecodeEl = document.getElementById('out-bytecode');
+  assert(bytecodeEl.children.length > 0, 'Bytecode panel populated after compile');
+
+  // ── 8. Error display ──────────────────────────────────────────────────────
+  suiteHeader('Error display');
+
+  editorPre.textContent = 'x : i32 = "hello";';
+  sv.setText('x : i32 = "hello";');
+  // Trigger livecompile
+  editorPre.dispatchEvent(new Event('input', { bubbles: true }));
+  await new Promise(r => setTimeout(r, 300));
+
+  const errPanel = document.getElementById('out-errors');
+  const errLines = errPanel.querySelectorAll('.err-line');
+  assert(errLines.length > 0, `error panel shows ${errLines.length} error(s)`);
+
+  // ── 9. Breakpoint toggle ──────────────────────────────────────────────────
+  suiteHeader('Breakpoint gutter');
+
+  sv.setText('a := 1;\nb := 2;\nc := 3;');
+  sv.setBpLines(new Set([2]));
+  const bpDots = gutter.querySelectorAll('.bp-active');
+  assert(bpDots.length === 1, `1 bp-active dot in gutter (got ${bpDots.length})`);
+
+  sv.setBpLines(new Set());
+  const bpDotsAfter = gutter.querySelectorAll('.bp-active');
+  assert(bpDotsAfter.length === 0, 'bp-active cleared');
+
+  // ── 10. Nav-bar hidden by default ─────────────────────────────────────────
+  suiteHeader('Nav bar');
+
+  const navBar = document.getElementById('nav-bar');
+  assert(!navBar.classList.contains('visible'), 'nav-bar hidden by default');
+
+  // ── 11. Event dispatching ─────────────────────────────────────────────────
+  suiteHeader('Custom events');
+
+  let gutterClicked = false;
+  sv.addEventListener('sv-gutter-click', () => { gutterClicked = true; }, { once: true });
+  const gutterSpan = gutter?.querySelector('[data-line]');
+  if (gutterSpan) gutterSpan.click();
+  else gutter.click();
+  assert(gutterClicked, 'sv-gutter-click event fires on gutter click');
+
+  // ── 12. Button state: Stop disabled by default ─────────────────────────────
+  suiteHeader('Button state: idle');
+
+  const btnStop = document.getElementById('btn-stop');
+  assert(btnStop !== null, '#btn-stop exists');
+  assert(btnStop.disabled === true, 'Stop button disabled at idle');
+
+  const btnRun2 = document.getElementById('btn-run');
+  const btnDebug2 = document.getElementById('btn-debug');
+
+  // After compile, Run and Debug should be enabled
+  sv.setText('main := fn() i32 { return 42; };');
+  editorPre.textContent = 'main := fn() i32 { return 42; };';
+  document.getElementById('btn-compile').click();
+  await new Promise(r => setTimeout(r, 100));
+  assert(btnRun2.disabled === false, 'Run enabled after compile');
+  assert(btnDebug2.disabled === false, 'Debug enabled after compile');
+  assert(btnStop.disabled === true, 'Stop still disabled before run');
+
+  // ── 13. ext::print output arrives immediately ─────────────────────────────
+  suiteHeader('ext::print / ext::printLn');
+
+  // Polling helper: returns true when predicate passes, or false on timeout
+  const waitFor = (pred, ms = 2000) => new Promise(resolve => {
+    const t0 = Date.now();
+    (function poll() { if (pred()) return resolve(true); if (Date.now() - t0 > ms) return resolve(false); setTimeout(poll, 50); })();
+  });
+
+  if (!crossOriginIsolated) {
+    assert(false, 'SKIPPED — crossOriginIsolated is false (serve via start.js)');
+  } else {
+
+  // Compile a program using ext::print (no newline)
+  const printSrc = 'main := fn() void { msg : array<u8, 5> = "hello"; ext::print(&msg, msg.size); };';
+  sv.setText(printSrc);
+  editorPre.textContent = printSrc;
+  document.getElementById('btn-compile').click();
+  await new Promise(r => setTimeout(r, 100));
+
+  const consolePre = document.getElementById('out-console');
+  // Clear console before run
+  const consPanel = document.getElementById('console-panel');
+  if (consPanel?.clear) consPanel.clear();
+  else consolePre.textContent = '';
+
+  // Run and wait for Worker to complete
+  document.getElementById('btn-run').click();
+  await waitFor(() => consolePre.textContent.includes('hello'), 3000);
+
+  const consoleText = consolePre.textContent;
+  assert(consoleText.includes('hello'), `console has "hello" (got: "${consoleText.slice(0, 60)}")`);
+
+  // Wait for program to finish (state returns to idle)
+  await waitFor(() => btnStop.disabled === true, 2000);
+  assert(btnStop.disabled === true, 'Stop disabled after run completes');
+  assert(btnRun2.disabled === false, 'Run re-enabled after run completes');
+
+  // ── 14. ext::printLn adds newline ─────────────────────────────────────────
+  const printLnSrc = 'main := fn() void { msg : array<u8, 5> = "world"; ext::printLn(&msg, msg.size); };';
+  sv.setText(printLnSrc);
+  editorPre.textContent = printLnSrc;
+  document.getElementById('btn-compile').click();
+  await new Promise(r => setTimeout(r, 100));
+  if (consPanel?.clear) consPanel.clear();
+  else consolePre.textContent = '';
+
+  document.getElementById('btn-run').click();
+  await waitFor(() => consolePre.textContent.includes('world'), 3000);
+
+  const consoleText2 = consolePre.textContent;
+  assert(consoleText2.includes('world\n'), `printLn adds newline (got: "${consoleText2.slice(0, 60)}")`);
+
+  } // end crossOriginIsolated guard
+  // ── 15. Stop button terminates running program ────────────────────────────
+  suiteHeader('Stop button');
+
+  if (!crossOriginIsolated) {
+    assert(false, 'SKIPPED — crossOriginIsolated is false (serve via start.js)');
+  } else {
+
+  // Compile a program that loops forever
+  const loopSrc = 'main := fn() void { x : mut i32 = 0; while (x < 999999999) { x = x + 1; }; };';
+  sv.setText(loopSrc);
+  editorPre.textContent = loopSrc;
+  document.getElementById('btn-compile').click();
+  await new Promise(r => setTimeout(r, 100));
+
+  document.getElementById('btn-run').click();
+  await waitFor(() => btnStop.disabled === false, 1000);
+
+  // While running, Stop should be enabled, Run/Debug disabled
+  assert(btnStop.disabled === false, 'Stop enabled while running');
+  assert(btnRun2.disabled === true, 'Run disabled while running');
+  assert(btnDebug2.disabled === true, 'Debug disabled while running');
+
+  // Click stop
+  btnStop.click();
+  await waitFor(() => btnStop.disabled === true, 1000);
+
+  assert(btnStop.disabled === true, 'Stop disabled after stop');
+  assert(btnRun2.disabled === false, 'Run re-enabled after stop');
+
+  } // end crossOriginIsolated guard
+
+  // ── Done ──────────────────────────────────────────────────────────────────
+  finish();
+}
+
+runTests().catch(err => {
+  const el = document.createElement('span');
+  el.className = 'test-line fail';
+  el.textContent = '✗ Test runner crashed: ' + err.message;
+  output.appendChild(el);
+  console.error(err);
+  failed++;
+  finish();
+});
+</script>
+
+</body>
+</html>

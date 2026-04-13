@@ -1,0 +1,144 @@
+// QLang — makra + struktury + namespace + benchmark (Compile → Run → main() = 1272)
+
+// ── Struktury ────────────────────────────────────────────────────────────
+
+Vec2 := struct { x: i32; y: i32; };
+
+// pole z domyślną wartością — Counter::default da { id: 0, n: 10 }
+Counter := struct {
+    id:    i32;
+    n:  mut i32 = 10;
+};
+
+// ── Namespace ────────────────────────────────────────────────────────────
+
+math := namespace;
+math::square := fn(x: i32) i32 { return x * x; };
+math::cube   := fn(x: i32) i32 { return x * x * x; };
+
+// alias — utils::square() wywołuje math::square()
+utils := namespace math;
+
+// struct auto-namespace + user-defined fn
+Vec2::len_sq := fn(v: Vec2) i32 { return v.x * v.x + v.y * v.y; };
+
+// ── Makra ────────────────────────────────────────────────────────────────
+
+// for_each: iteracja po tablicy (arr:expr, elem:ident, body:block)
+for_each := macro(arr : expr, elem : ident, body : block) {
+    $i : mut u32 = 0;
+    while ($i < @arr.size) {
+        @elem := @arr.[$i];
+        @body;
+        $i = $i + 1;
+    }
+};
+
+// double: podwaja zmienną w miejscu
+double := macro(x : ident) {
+    @x = @x + @x;
+};
+
+// double_pair: zagnieżdżone makra — outer wywołuje inner
+double_pair := macro(a : ident, b : ident) {
+    double!(@a);
+    double!(@b);
+};
+
+// with_min_max: szuka min i max, deklaruje oba wyniki (lo:ident, hi:ident)
+with_min_max := macro(arr : expr, lo : ident, hi : ident) {
+    @lo : mut i32 = @arr.[0];
+    @hi : mut i32 = @arr.[0];
+    $i : mut u32 = 1;
+    while ($i < @arr.size) {
+        $v := @arr.[$i];
+        if ($v < @lo) { @lo = $v; }
+        if ($v > @hi) { @hi = $v; }
+        $i = $i + 1;
+    }
+};
+
+// ── Funkcje rekurencyjne ─────────────────────────────────────────────────
+
+fibonacci := fn(n: i32) i32 {
+    if (n <= 1) { return n; }
+    return fibonacci(n - 1) + fibonacci(n - 2);
+};
+
+factorial := fn(n: i32) i32 {
+    if (n <= 1) { return 1; }
+    return n * factorial(n - 1);
+};
+
+// ── main ─────────────────────────────────────────────────────────────────
+
+main := fn() i32 {
+    // struktury: Vec2::of i Counter::default
+    v : Vec2 = Vec2::of(3, 7);         // v.x=3, v.y=7
+    c : Counter = Counter::default;    // c.id=0, c.n=10 (wartość domyślna pola)
+    struct_val := v.x + v.y + c.n;    // 3 + 7 + 10 = 20
+
+    // namespace: square, cube, alias, struct fn
+    sq  := math::square(5);            // 5 * 5       = 25
+    cb  := math::cube(3);              // 3 * 3 * 3   = 27
+    al  := utils::square(4);           // alias → math::square(4) = 16
+    lsq := Vec2::len_sq(v);            // 3*3 + 7*7   = 58
+    ns_val := sq + cb + al + lsq;      // 25+27+16+58 = 126
+
+    // rekurencja
+    r1 := fibonacci(10);           // fib(10)     = 55
+    r2 := factorial(6);            // 6!          = 720
+
+    // for_each: suma tablicy
+    scores : array<i32, 5> = {10, 20, 30, 40, 50};
+    total : mut i32 = 0;
+    for_each!(scores, v2, {
+        total = total + v2;
+    });
+    // total = 150
+
+    // with_min_max: zakres
+    vals : array<i32, 4> = {3, 99, 7, 42};
+    with_min_max!(vals, lo_val, hi_val);
+    // lo_val = 3,  hi_val = 99  →  range = 96
+
+    // zagnieżdżone makra: double_pair → double (podwaja dwie zmienne)
+    np : mut i32 = 3;
+    nq : mut i32 = 7;
+    double_pair!(np, nq);
+    // np = 6, nq = 14
+    nested_val := np + nq;             // 6 + 14          = 20
+
+    // wskaźniki + dereferencja
+    x := 42;
+    p := &x;
+    r3 := p.*;                     // ptr.*       = 42
+
+    // ptr na funkcję
+    fp : ptr<fn(n: i32) i32> = &factorial;
+    r4 := fp.*(6);                 // fp.*(6)     = 720
+
+    // lokalna fn + mut param
+    inc := fn(n: mut i32) i32 { n = n + 1; return n; };
+    r5 := inc(9);                  // inc(9)      = 10
+
+    // short-circuit &&
+    sc : mut i32 = 0;
+    if ((r1 > 50) && (r2 > 100)) { sc = 1; }
+    // sc = 1
+
+    // while + break
+    counter : mut i32 = 0;
+    limit   : mut i32 = 0;
+    while (counter < 1000) {
+        limit = limit + 1;
+        counter = counter + limit;
+        if (counter > 500) { break; }
+    }
+    // limit = 32
+
+    // struct=20, ns=126, r1=55, total=150, range=96, r3=42, r4=720, r5=10, sc=1, limit=32, nested=20
+    return struct_val + ns_val + r1 + total + (hi_val - lo_val) + r3 + r4 + r5 + sc + limit + nested_val;
+    // 20 + 126 + 55 + 150 + 96 + 42 + 720 + 10 + 1 + 32 + 20 = 1272
+};
+// main() = 1272

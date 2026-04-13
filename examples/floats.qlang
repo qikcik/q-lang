@@ -1,0 +1,81 @@
+// QLang — f64 Floating Point
+//
+// After Run:
+//   sum(1.5 + 2.75) x100 = 425   (= 4.25)
+//   ratio(7/3) x100     = 233   (= 2.333...)
+//   avg([10..60]) x10   = 350   (= 35.0)
+//   circle_area x100    = 314   (pi*1*1 ≈ 3.14)
+//
+// Feature coverage:
+//   f64 literal       — 1.5, 2.75, 0.0, 3.14159...
+//   as<f64>(i32)      — integer → float (widening conversion)
+//   as<i32>(f64)      — float → integer (truncation)
+//   f64 arithmetic    — +, -, *, /
+//   array average     — sumowanie i32 tablicy jako f64, podział
+
+// ── Print helpers ─────────────────────────────────────────────────────────────
+
+printByte := fn(b: u8) void {
+    ch : array<mut u8, 1> = { 0 };
+    ch.[0] = b;
+    ext::print(&ch, 1);
+};
+
+printInt := fn(n: i32) void {
+    hundreds := n / 100;
+    tens      := (n - hundreds * 100) / 10;
+    ones      := n - hundreds * 100 - tens * 10;
+    if (hundreds > 0)              { printByte(as<u8>(48 + hundreds)); }
+    if (hundreds > 0 || tens > 0) { printByte(as<u8>(48 + tens)); }
+    printByte(as<u8>(48 + ones));
+};
+
+printLabelAndInt := fn(label: ptr<u8>, labelLen: u32, n: i32) void {
+    ext::print(label, labelLen);
+    printInt(n);
+    printByte('\n');
+};
+
+// ── main ──────────────────────────────────────────────────────────────────────
+
+main := fn() void {
+    // ── 1. Literały f64 i podstawowa arytmetyka ───────────────────────────────
+    a : f64 = 1.5;
+    b : f64 = 2.75;
+    sum := a + b;           // 4.25
+    sumx100 := as<i32>(sum * 100.0);  // 425
+    lbl1 := "sum(1.5 + 2.75) x100 = ";
+    ext::print(&lbl1, lbl1.size);
+    printInt(sumx100); printByte('\n');
+
+    // ── 2. Konwersja integer → float, dzielenie ───────────────────────────────
+    x : i32 = 7;
+    y : i32 = 3;
+    ratio := as<f64>(x) / as<f64>(y);   // 2.333...
+    ratiox100 := as<i32>(ratio * 100.0); // 233
+    lbl2 := "ratio(7/3) x100     = ";
+    ext::print(&lbl2, lbl2.size);
+    printInt(ratiox100); printByte('\n');
+
+    // ── 3. Średnia tablicy integers liczona jako f64 ───────────────────────────
+    nums : array<i32, 6> = { 10, 20, 30, 40, 50, 60 };
+    total : mut f64 = 0.0;
+    i : mut u32 = 0;
+    while (i < nums.size) {
+        total = total + as<f64>(nums.[i]);
+        i = i + 1;
+    }
+    avg := total / as<f64>(6);    // 35.0
+    avgx10 := as<i32>(avg * 10.0); // 350
+    lbl3 := "avg([10..60]) x10   = ";
+    ext::print(&lbl3, lbl3.size);
+    printInt(avgx10); printByte('\n');
+
+    // ── 4. Pi ≈ 3.14159 — użycie literału zmiennoprzecinkowego ───────────────
+    pi   : f64 = 3.14159;
+    area := pi * 1.0 * 1.0;          // circle area for radius=1
+    areax100 := as<i32>(area * 100.0); // 314
+    lbl4 := "circle_area x100    = ";
+    ext::print(&lbl4, lbl4.size);
+    printInt(areax100); printByte('\n');
+};

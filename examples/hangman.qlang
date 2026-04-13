@@ -1,0 +1,101 @@
+// QLang — Hangman (wisielec)
+//
+// Tajne słowo: QLANG (5 liter)
+// Gracz ma 6 prób. Wpisuje jedną literę na turę.
+// Małe litery są automatycznie zamieniane na wielkie.
+
+// printByte — wypisuje pojedynczy bajt
+printByte := fn(b: u8) void {
+    ch : array<mut u8, 1> = { 0 };
+    ch.[0] = b;
+    ext::print(&ch, 1);
+};
+
+main := fn() void {
+    // Tajne słowo
+    word  : array<u8, 5>       = "QLANG";
+    found : array<mut bool, 5> = { false, false, false, false, false };
+    lives : mut i32 = 6;
+
+    hello : array<u8, 16> = "=== HANGMAN ===\n";
+    ext::print(&hello, hello.size);
+
+    running : mut bool = true;
+    while (running) {
+
+        livesLbl : array<u8, 7> = "Lives: ";
+        ext::print(&livesLbl, livesLbl.size);
+        printByte(as<u8>(48 + lives));
+        printByte('\n');
+
+        // Wypisz aktualny stan słowa: "_ _ _ _ _" lub litery
+        wi : mut u32 = 0;
+        while (wi < 5) {
+            if (found.[wi]) {
+                printByte(word.[wi]);
+            } else {
+                printByte('_');
+            }
+            printByte(' ');
+            wi = wi + 1;
+        }
+        printByte('\n');
+
+        guessLbl : array<u8, 7> = "Guess: ";
+        ext::print(&guessLbl, guessLbl.size);
+
+        // Wczytaj literę od użytkownika
+        ibuf : array<mut u8, 4> = { 0, 0, 0, 0 };
+        n := ext::input(&ibuf, 4);
+
+        if (n == 0) {
+            running = false;
+        } else {
+            guess : mut u8 = ibuf.[0];
+
+            // Mała litera → wielka litera  (a=97..z=122 → A=65..Z=90)
+            if (guess >= 97 && guess <= 122) {
+                guess = as<u8>(guess - 32);
+            }
+
+            // Sprawdź czy litera jest w słowie
+            hit  : mut bool = false;
+            gi   : mut u32  = 0;
+            while (gi < 5) {
+                if (word.[gi] == guess) {
+                    found.[gi] = true;
+                    hit = true;
+                }
+                gi = gi + 1;
+            }
+
+            if (!hit) {
+                lives = lives - 1;
+                wrongMsg : array<u8, 7> = "Wrong!\n";
+                ext::print(&wrongMsg, wrongMsg.size);
+            }
+
+            // Sprawdź wygraną
+            allFound : mut bool = true;
+            fi       : mut u32  = 0;
+            while (fi < 5) {
+                if (!found.[fi]) {
+                    allFound = false;
+                }
+                fi = fi + 1;
+            }
+
+            if (allFound || lives == 0) {
+                running = false;
+            }
+        }
+    }
+
+    if (lives > 0) {
+        winMsg : array<u8, 28> = "You win! The word was QLANG\n";
+        ext::print(&winMsg, winMsg.size);
+    } else {
+        loseMsg : array<u8, 30> = "Game over! The word was QLANG\n";
+        ext::print(&loseMsg, loseMsg.size);
+    }
+};

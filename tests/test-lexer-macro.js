@@ -1,0 +1,11 @@
+import { tokenize, TT } from '../compiler/lexer.js';
+const t1 = tokenize('$i + $j');
+console.log('MACRO_VAR:', t1[0].type, t1[0].value);
+const t2 = tokenize('@arr');
+console.log('MACRO_PARAM:', t2[0].type, t2[0].value);
+const t3 = tokenize('i32::of');
+console.log('::', t3[1].type, t3[1].value);
+const t4 = tokenize('macro');
+console.log('macro:', t4[0].type, t4[0].value);
+const t5 = tokenize('@elem := @arr.[$i];');
+console.log('complex macro tokens:', t5.map(t => t.type + ':' + t.value).join(' '));
