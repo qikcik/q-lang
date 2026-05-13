@@ -1,6 +1,6 @@
 # QLang — Architektura (Wprowadzenie)
 
-> Stan na: 2026-04-12 (aktualizacja: **`else if`** + **unary minus (`-`)** w kompilatorze; Worker-based Run+Debug via wasm-runner.js; zunifikowany SharedArrayBuffer protocol; konsola kolorowa; Stop w toolbarze)
+> Stan na: 2026-05-13 (aktualizacja: defer-pass, resilient parser (3-tier split), type-infer split, multi-file VFS, file-tree, uzupełnienie listy plików i testów)
 > Szczegółowa dokumentacja: [archDetail.md](archDetail.md)
 
 ---
@@ -33,9 +33,14 @@ AST (macros resolved)
     │
     ▼  typecheck(ast)          ← staticTypeChecker.js
 Typed AST
+    │
+    ▼  deferPass(ast)          ← defer-pass.js  (AST rewrite: DeferStmt → inline stmts)
+Typed AST (bez DeferStmt)
+    │
+    ▼  generate(ast)           ← codegen.js  (orkiestrator)
 ```
 
-Fazy 1–3 (tokenize → parse → expand → typecheck) są orkiestrowane przez `compiler/pipeline.js`:
+Fazy 1–3b (tokenize → parse → expand → typecheck → deferPass) są orkiestrowane przez `compiler/pipeline.js`:
 ```
     compile(src)            ← pipeline.js  — zwraca { tokens, ast, expLog, parseErrors, mainSource }
     │                          gdy parseErrors.length > 0: expand+typecheck+deferPass pominięte
@@ -63,14 +68,18 @@ WASM Instance → main() → konsola IDE
 index.html               — UI (edytor, przyciski, panele, CSS)
 ide/
   main.js                — Entry point: compile/run/debug + inicjalizacja
-  source-view.js         — <qlang-source-view> Web Component: editable (główny edytor) + read-only (panel makra)
+  source-view.js         — <qlang-source-view> Web Component: editable (główny edytor) + read-only
   qlang-pane.js          — <qlang-pane> Web Component: wrapper strukturalny paneli
   qlang-toolbar.js       — <qlang-toolbar> Web Component: przyciski nagłówka → eventy ql-*
-  qlang-error-panel.js   — <qlang-error-panel> Web Component: setErrors(), log(), clear() → ql-error-click
-  qlang-console.js       — <qlang-console> Web Component: write(text) [biały], log(msg) [niebieski], clear(), startInput(cb), cancelInput()
+  qlang-error-panel.js   — <qlang-error-panel> Web Component: setErrors(), log(), clear()
+  qlang-console.js       — <qlang-console> Web Component: write(text), log(msg), clear(), startInput(cb), cancelInput()
+  vfs.js                 — VirtualFileSystem: multi-file project management (persist, sessions)
+  file-tree.js           — <qlang-file-tree> Web Component: drzewo plików, create/rename/delete, eventy ft-*
+  project-ui.js          — Project UI: new-project dialog, open, save, tab management
+  examples.js            — Wczytywanie przykładów (examples/index.json → VFS)
   layout.js              — Resize handlerów, drag & drop paneli, zwijanie/rozwijanie
   views.js               — Renderery: syntaxHighlight, renderWAT, renderBytecode
-  crossSelection.js      — Cienki re-export shim (~25 linii): setStmtMap, enclosingStmt, highlightSourceRange
+  crossSelection.js      — Cienki re-export shim: setStmtMap, enclosingStmt, highlightSourceRange
   highlight.js           — Koordynator podświetleń: highlightAndScrollSource, applyChainHighlights, clearAll
   ide-state.js           — Pasywny store: setExpLog/getExpLog, setLast*/getLast* (zero zależności)
   source-registry.js     — Rejestr SourceBuffer + widoków; getAllSourceIds, getView, registerView
@@ -85,16 +94,21 @@ ide/
   lang-docs.js           — Markdown renderer + ładowanie dokumentacji języka
 compiler/
   lexer.js               — Tokenizer
-  parser.js              — Recursive descent parser (resilient: ErrorNode + top/stmt recovery)
-  source-buffer.js       — SourceBuffer class: { id, text, kind, callSite }; forMain(text, tokens?), forMacro()
+  parser-base.js         — ParseError, node(), ParserBase (stream utilities)
+  parser-exprs.js        — ParserExprs extends ParserBase — parseType() + parseXxxExpr()
+  parser.js              — Parser extends ParserExprs — deklaracje, instrukcje, struct (resilient: ErrorNode)
+  source-buffer.js       — SourceBuffer class: { id, text, kind, callSite }
+  source-ref.js          — SourceRef / source location helpers
   source.js              — Utility fns: offsetToLine, offsetToLineCol, srcStart, srcEnd
-  macro-expander.js      — Faza 2.5: macro expander orkiestrator (~300 linii)
-  macro-substitute.js    — substituteStmts, kindCheck, parseArgForSub (~280 linii)
-  macro-unpack.js        — expandUnpack (built-in unpack!) (~100 linii)
+  macro-expander.js      — Faza 2.5: macro expander orkiestrator
+  macro-substitute.js    — substituteStmts, kindCheck, parseArgForSub
+  macro-unpack.js        — expandUnpack (built-in unpack!)
   macro-error.js         — MacroError class
   staticAnalysis.js      — Typy pomocnicze, helpery, Scope
-  staticTypeChecker.js   — TypeChecker + typecheck() + liveTypecheck()
+  type-infer.js          — TypeInferBase — wszystkie metody infer*()
+  staticTypeChecker.js   — TypeChecker extends TypeInferBase (check*) + typecheck() + liveTypecheck()
   pipeline.js            — compile(src) + liveCompile(src) (fazy 1–4 + deferPass)
+  defer-pass.js          — Faza 3b: AST rewrite — DeferStmt → inline stmts
   ast-to-source.js       — AST → sformatowany kod QLang (fundament formatera)
   wasm-encoder.js        — LEB128, opcody, sekcje WASM
   wat-utils.js           — SExprBuilder, BUILTINS, canonType, BumpAllocator
@@ -107,11 +121,21 @@ tests/
   helpers.js             — test, suite, assert, compileAndGenerate, summarize
   test.js                — Orkiestrator (importuje wszystkie test-*.js)
   test-lexer.js          — Suity: typy tokenów, offsety, błędy
+  test-lexer-macro.js    — Suity: tokenizacja makr
   test-parser.js         — Suity: VarDecl, FuncDecl, wyrażenia, start/end
+  test-parser-macro.js   — Suity: parsowanie makr
+  test-parser-recovery.js — Suity: resilient parsing, ErrorNode recovery
   test-typechecker.js    — Suity: inferencja, lokalne funkcje, błędy, shadowowanie
   test-codegen.js        — Suity: WASM validity, tablice, ptr, ByteSpan, debugger
   test-macros.js         — Suity: rozwijanie makr, BracketAccess, QualifiedName, Namespace
+  test-struct.js         — Suity: struct declaration, field access, type checking
+  test-namespace.js      — Suity: namespace, qualified names, hover, chained dot-completion
+  test-defer.js          — Suity: defer statements
+  test-ide-logic.js      — Suity: autocomplete logic, getScopeItems, resolveChainedType
+  test-ide-ui.js         — Suity: IDE UI behavior, auto-indent
   test-ide-smoke.js      — Suity: DOM IDs, pliki IDE, pipeline shape, Web Component tagi
+  test-vfs.js            — Suity: VFS Project, createProject, persistence
+  test-ast-renderer.js   — Suity: AST rendering
 start.js                 — Serwer deweloperski Node.js: COOP/COEP headers + no-cache; wymagany dla SharedArrayBuffer
 ```
 

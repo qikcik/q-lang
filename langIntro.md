@@ -1,6 +1,6 @@
 # QLang — Wprowadzenie do języka
 
-> Stan na: 2026-04-12 (aktualizacja: **`else if`**, **unary minus (`-expr`)**, makra, BracketAccessExpr arr.[i], QualifiedName T::of/default, **struktury**, **namespace'y**)
+> Stan na: 2026-05-13 (aktualizacja: **`else if`**, **unary minus (`-expr`)**, makra, BracketAccessExpr arr.[i], QualifiedName T::of/default, **struktury**, **namespace'y**; **`void`**, **`defer`**, **`break`**, literały znakowe `'x'`, konkatenacja string literals)
 > Pełna specyfikacja z przykładami: [langDetail.md](langDetail.md)
 
 ---
@@ -22,6 +22,8 @@
 `i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `i64`, `u64`, `f32`, `f64`, `bool`
 
 Scalary nie są keywordami — to zwykłe identyfikatory z pre-rejestrowanymi namespace'ami (`i32::of`, `i32::default`).
+
+Typ specjalny: `void` — tylko jako return type funkcji bez wyniku (`fn() void { ... }`). Nie jest wartością.
 
 ### Wskaźniki
 `ptr<T>` — wskaźnik (i32 w linear memory). Dereferencja postfixowa: `p.*`
@@ -64,6 +66,8 @@ x := 5;              // const, inferred i32
 y : mut i32 = 10;    // mutable, explicit
 arr := {1, 2, 3};    // const array<i32, 3>
 msg := "hello";      // const array<u8, 5>
+c := 'A';            // const i32 (char literal — kod ASCII; zakres 0–127)
+cat := "foo" "bar";  // const array<u8, 6> — konkatenacja sąsiednich string literals
 ```
 
 - Inferred (`x := expr`) — zawsze const
@@ -71,6 +75,8 @@ msg := "hello";      // const array<u8, 5>
 - Shadowing zabroniony (błąd kompilacji)
 - Anonimowy blok `{ ... }` jako statement tworzy nowy leksykalny scope (`ScopeBlock`)
 - Konwersja typów: `as<f32>(x)` (tylko skalary)
+- `defer expr;` / `defer { stmts };` — wykonywane przy wyjściu z bloku (LIFO); pełna spec §11.2 langDetail.md
+- `break` — przerywa bieżącą pętlę `while`; błąd kompilacji jeśli użyty poza pętlą
 
 ---
 

@@ -1,6 +1,6 @@
 # QLang — Namespace Plan
 
-> Status: propozycja (2026-04-11)
+> Status: **ZAIMPLEMENTOWANE** — archiwum decyzji projektowych. Zob. [langDetail.md](langDetail.md) §namespace i §10 ograniczenia. Namespace'd variables (`std::BAR := 42;`) — parser obsługuje, codegen/typechecker deferred do v2.
 
 ---
 

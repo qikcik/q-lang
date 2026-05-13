@@ -222,3 +222,338 @@ Snake wymaga I/O capabilities których QLang nie posiada (non-blocking input, sc
 1. **`input-print.qlang`** — duplikat pierwszych 3 linii hangman; jeśli zostaje, przemianować na `minimal-io.qlang` z explicite "minimal example" labelem, nie jako showcase language capability
 2. **Brak feature coverage maps** — każdy obecny example zakłada że czytelnik domyśli się co demonstruje; to musi skończyć się z każdym nowym example
 3. **"Testy sprawdzają czy błąd jest rzucony"** — `test-typechecker.js` pattern `errors.length > 0` bez weryfikacji treści message; dodać minimum jedno assertion na message substring dla każdego error testu
+
+---
+
+---
+
+# QLang — Code Council Analysis
+> Sesja: 2026-05-13 | Temat: Analiza synchronizacji dokumentacji *.md z implementacją
+
+---
+
+## 4. `langDetail.md` + `langIntro.md` — dywergencja dokumentacji języka
+
+### Consensus Leader: D (Senior C++ Abomination)
+
+### Summary
+Oba pliki `langDetail.md` i `langIntro.md` mają datę `2026-04-12` i nie odzwierciedlają co najmniej pięciu zaimplementowanych features: `defer`, `pack`/`unpack!`, `break`, literały znakowe `'x'`, konkatenacja stringów. Najpoważniejszy błąd faktyczny: `langDetail.md` §3.3 używa starej składni `arr[i]` (`slots[0] = 99; // OK`) zamiast `arr.[i]` — tymczasem `changeProposal.md` potwierdza że `IndexExpr` (`arr[i]`) zostało usunięte z parsera. Użytkownik próbujący wkleić przykład z dokumentacji dostanie błąd parsowania. `langIntro.md` nie mówi nic o `defer`, `pack`, `void`, `break`, `ScopeBlock` ani literałach znakowych. `langExtensionMacro.md` §9.2 urywa się w połowie przykładu (plik ma 241 linii i kończy na `}` bez zamknięcia sekcji). Sekcja `pack` kind jest wymieniona w tabeli kindów ale nie ma własnego opisu ani przykładu mimo że `pack`/`unpack!` jest IMPLEMENTED (MVP) per `changeProposal.md`. Dokumentacja języka jest kompletna do circa 2026-04-12 — niemal miesiąc za implementacją.
+
+### Required Changes
+- **Krytyczny błąd faktyczny**: `langDetail.md` §3.3 — zmienić `slots[0] = 99` → `slots.[0] = 99` (i analogiczne wystąpienia `arr[i]` → `arr.[i]`); `arr.[i]` to jedyna legalna składnia od implementacji changeProposal item 5
+- Dodać sekcję `defer` do `langDetail.md` (odpowiednik §defer): semantyka LIFO, kolejność przed `return`, interakcja z zagnieżdżonymi scope'ami, przykład cleanup pattern
+- Dodać sekcję `break` do `langDetail.md` (jest w `AC_STATIC`, jest w kodzie, nie ma w specyfikacji)
+- Zaktualizować `langIntro.md` — dodać wzmiankę o `defer`, `void`, literałach znakowych, konkatenacji stringów
+
+### Observations
+- `lang​Detail.md` §3.3 `buf[0] = 72; // OK` — takie samo wystąpienie starego składni `arr[i]`; przeszukać cały plik na wzorzec `arr[` i podmienić
+- `langExtensionMacro.md` kończy się na otwartej sekcji §9.2 `for_each` — brakuje przykładów `swap!`, `assert!`, sekcji `pack` kind z przykładem `unpack!`
+- `langIntro.md` §2 kończy się urwaną sekcją tablicy (ostatnia linijka to ` ``` `) — wizualny sygnał że plik jest niekompletny
+- Sekcja `defer` w `langDetail.md` powinna explicite powiedzieć że `return expr` ewaluuje wyrażenie zanim uruchomią się deferred statementy (kluczowa subtelność per feedback F)
+- `langDetail.md` §10 Ograniczenia wymienia "brak zagnieżdżonych struktur w polach przy codegen" — weryfikować czy to nadal prawda
+
+### Concrete Actions
+- Szukaj/zamień w `langDetail.md`: `arr[i]` → `arr.[i]`, `arr[0]` → `arr.[0]`, `buf[0]` → `buf.[0]`
+- Dodać do `langDetail.md` nową sekcję §12 `defer`:
+  ```
+  defer expr;           // odłożona pojedyncza instrukcja
+  defer x = val;        // odłożone przypisanie
+  defer { blok };       // odłożony blok
+  ```
+  Z opisem: LIFO, wstrzykiwane przed każdym `return`, przy fallthrough na końcu bloku; wartość return-expression jest obliczana przed uruchomieniem deferred.
+- Dodać do `langDetail.md` §13 `break` — legalna tylko wewnątrz `while`, przerywa pętlę
+- Dodać do `langExtensionMacro.md` sekcję §10 `pack` kind z przykładem `unpack!`
+- Zaktualizować daty "Stan na:" w obu plikach na 2026-05-13
+
+### Needs Deeper Analysis
+- `langDetail.md` §10 "brak zagnieżdżonych struktur w polach przy codegen" — czy `struct A { b: B; }` działa przy codegen gdy `B` ma pola skalarne? Sprawdzić `test-struct.js`
+- `langExtensionMacro.md` §7 mówi `arr.[i]` — plik wydaje się zaktualizowany co do tej składni, więc tylko sekcja pack i truncated §9 wymagają uzupełnienia
+
+---
+
+### Best Value to Noise Perspectives' Commentary
+
+**D (Senior C++ Abomination)**: Błąd `arr[i]` w §3.3 to nie tylko doc-bug — to potencjalnie dezorientuje nowych użytkowników którzy próbują składni z dokumentacji. W systemowych językach "dokumentacja = kontrakt". Tutaj kontrakt jest naruszony. Priorytet zero: naprawić przykłady kodu w langDetail przed wszystkim innym.
+
+**A (Assembler Pragmatist)**: Wszystkie wystąpienia `arr[i]` w dokumentacji — szybki grep wykaże dokładnie ile ich jest. Zrobić to zanim cokolwiek innego.
+
+**J (Cognitive Scientist)**: Sekcja `defer` musi zawierać przykład który pokazuje "kiedy to się odpala" — nie tylko składnię. Kluczowa jest wizualna prezentacja: "piszesz na górze, odpala się na dole". Cognitive model użytkownika domyślnie zakłada że `defer` jest "po return" — spec musi ten model korygować explicite.
+
+**K (Reluctant Manual Tester)**: `langDetail.md` §10 mówi że  `Namespace'd variables` są deferred to v2 — OK. Ale czy user wie że `std::BAR := 42;` jest parsowane ale ignorowane przez codegen czy rzuca błąd? To jest K-assumption: zakładamy że user nie spróbuje tej składni. Może spróbuje.
+
+**B (Open-Source Paradigm Challenger)**: `defer` jako AST-rewrite pass (nie runtime construct) jest architektonicznie ciekawą decyzją — warto to explicite zaznaczyć w sekcji jako "note dla implementorów". Zig ma `defer` jako runtime construct (odwrócony stack). QLang robi to w compile-time. Różnica ma implikacje dla future design.
+
+**C (Corporate Java Architect)**: Tabela feature→status w §10 Ograniczenia jest niekompletna i nie ma "implemented yes/no". Zamienić na dwie sekcje: "Implemented features" i "Known limitations" — jeden wzrok, jasny podział.
+
+---
+
+### Rejected Perspectives' Commentary
+
+**H (Accidental Manager)**: Pięć ticketów na dokumentację — każdy z description of done. Nie będę tu pisał backlogu. Chodzi o to żeby naprawić pliki, nie planować naprawianie plików.
+
+**G (Deletion Wizard)**: `langIntro.md` jest duplikatem `langDetail.md` na pierwszy rzut oka — warto rozważyć usunięcie. Ale consensus zdecydował że obie warstwy są potrzebne. Zostawiam pod protest: dwa pliki = podwójny koszt utrzymania.
+
+**E (Lisp/Haskell Pipeline Fanatic)**: Dokumentacja `defer` powinna wyjaśnić że jest to fold nad listą DeferStmt w AST — nowa sekwencja instrukcji zamiast oryginalnych. Ten model jest precyzyjniejszy niż "odpala przed return". Consensus nie uwzględnił tej warstwy.
+
+### Perspective Summary
+`langDetail.md` i `langIntro.md` są miesiąc w tyle za implementacją. Jeden błąd faktyczny (składnia `arr[i]`) jest krytyczny ponieważ generuje błędy parsowania przy kopiowaniu z dokumentacji. Cztery brakujące sekcje (`defer`, `break`, `pack`/`unpack!`, char literals) to hidden features niemożliwe do odkrycia przez użytkownika czytającego spec. Hierarchia pilności: (1) napraw `arr[i]` → `arr.[i]`, (2) dodaj sekcję `defer`, (3) dodaj break, (4) uzupełnij langExtensionMacro §pack. Daty "Stan na:" powinny być aktualizowane przy każdej zmianie — obecnie są martwym sygnałem.
+
+---
+
+## 5. `langExtensionMacro.md` — urwany plik; `namespace.md` — zombie-proposal
+
+### Consensus Leader: D (Senior C++ Abomination)
+
+### Summary
+`namespace.md` ma header `> Status: propozycja (2026-04-11)` — ale namespace jest zaimplementowany. `test-namespace.js` istnieje, `QualifiedName` jest w `parser.js`, `inferQualifiedName()` jest w `type-infer.js`, `NamespaceDecl`/`NamespacedDecl` są w parserze. Wszystkie sekcje `namespace.md` (§3 składnia, §4 eliminacja TYPE_KW, §5 eliminacja TypeConstructorExpr→QualifiedName, §6 scope model) opisują implementację która już jest. Jedyna sekcja która jest still-deferred: namespace'd variables (`std::BAR := 42`) — explicite wymienione w `langDetail.md` §10. `namespace.md` powinno zostać przeniesione do `docs/history/` jako implementation record albo przekształcone w reference documentation usuwając "Status: propozycja". `langExtensionMacro.md` urywa się po §9.2 `for_each` — brakuje przykładów `swap!`/`assert!` i całkowicie brakuje sekcji o `pack` kind mimo że MVP jest zaimplementowany (changeProposal item 9).
+
+### Required Changes
+- `namespace.md`: usunąć lub zmienić header `> Status: propozycja` — implementacja jest zrobiona; przenieść do `docs/history/namespace-impl.md` jako archived implementation notes, albo zaktualizować status na `> Status: ZAIMPLEMENTOWANE (2026-04-11)` z notą co jest deferred
+- `langExtensionMacro.md`: dodać sekcję §10 `pack` kind — opis `pack<any>`, `pack<expr>`, reguła "ostatni parametr", `[...]` literal, `unpack!` built-in z przykładem
+- `langExtensionMacro.md`: dodać przykłady §9.3 `swap!` i §9.4 pełny `assert!` z wywołaniem i rozwinięciem
+
+### Observations
+- `namespace.md` §3.5 (alias `gfx := namespace Engine::Graphics`) — zaimplementowane, ale `langDetail.md` nie ma tej składni; aliasy namespace są jedyną brakującą reference w langDetail
+- `namespace.md` §7 Parser changes i §7.3 `parseCallOrPrimary()` pokazują wewnętrzne detale implementacji które są nieodpowiednie dla dokumentacji języka (OK w docs/history)
+- `langExtensionMacro.md` §6.1 `$name` gensym — dobrze opisany. §6.2 `@param` — dobrze opisany. §7 `arr.[i]` — aktualny. §8 `T::of`/`T::default` — aktualny
+- `changeProposal.md` item 3 mówi "`#expand` has been removed, replaced by `unpack!`" — `langExtensionMacro.md` tabel kindów nadal wymienia `pack` w wierszu tabeli ale nie ma sekcji opisującej jak `unpack!` działa
+
+### Concrete Actions
+- Zmienić header `namespace.md` na: `> Status: ZAIMPLEMENTOWANE — archiwum decyzji projektowych. Zob. langDetail.md §namespace.`
+- Dodać do `langDetail.md` §namespace wzmiankę o aliasach (`gfx := namespace Engine::Graphics; gfx::draw();`)
+- Dodać do `langExtensionMacro.md` sekcję §10:
+  ```
+  ## 10. Pack — argumenty wariadic
+  pack<kind>  — comptime-only sekwencja argumentów
+  [v1, v2, v3]  — PackLiteral
+  unpack!(vals, iter, { ciało })  — built-in rozwinięcie
+  ```
+- Dodać do `langExtensionMacro.md` kompletny przykład `unpack!` z `LogAll!`
+- `changeProposal.md` item 3: `#expand` removed — upewnić się że `langExtensionMacro.md` nie wspomina `#expand` (usunąć ewentualne wzmianki)
+
+### Needs Deeper Analysis
+- Czy `pack<expr>` vs `pack<any>` jest kiedykolwiek differentiated w obecnym type-checkerze? `changeProposal.md` mówi MVP — może tylko `pack<any>` działa
+- Jak dokładnie `unpack!` wygląda w AST po expanacji? `macro-expander.js` ma `expandUnpack` — warto przejrzeć `macro-unpack.js` aby sfinalizować przykład w docs
+
+---
+
+### Best Value to Noise Perspectives' Commentary
+
+**D (Senior C++ Abomination)**: `namespace.md` w docs/history to właściwe miejsce. Ale zanim tam trafi — ktoś musi upewnić się że wszystkie dobre examples z §3 są przeniesione do `langDetail.md` (alias namespace, struct auto-namespace, `Player::kill`). Informacja nie może zniknąć, tylko zmienić lokalizację.
+
+**A (Assembler Pragmatist)**: Grep na `#expand` w całym projekcie — jeden wynik: `changeProposal.md` item 3. `langExtensionMacro.md` nie wspomina `#expand`. Nie ma czego usuwać. Jeden mniej task.
+
+**C (Corporate Java Architect)**: Dwa pliki opisujące system makr (`langDetail.md` §5.6 odsyłającego do `langExtensionMacro.md`) to fragment architektury docs który działa — cross-reference jest poprawny. Ale `pack` jest wymieniony w tabeli kindów `langExtensionMacro.md` bez własnej sekcji — to jest broken reference pattern.
+
+**J (Cognitive Scientist)**: `unpack!` jest built-in makrem. Użytkownik który szuka "jak iterować po pack" znajdzie `unpack!` w auto-complete (bo jest keywordem?) albo wcale go nie znajdzie. Discoverability wymaga albo sekcji w docs albo hover hint w IDE dla `unpack`.
+
+**K (Reluctant Manual Tester)**: `gfx := namespace Engine::Graphics; gfx::draw();` — czy to naprawdę działa? Napisałbym 4-liniowy test w IDE. Jeśli działa, to fajne. Jeśli nie — wtedy `langDetail.md` §10 powinno to wymienić jako ograniczenie.
+
+---
+
+### Rejected Perspectives' Commentary
+
+**F (Confused Junior)**: Nie wiem co to jest `pack`. Może dokumentacja jest prosta i ja po prostu nie rozumiem. Ale `unpack!` nie jest w żadnym przykładzie `.qlang` — czy to w ogóle jest feature dla użytkowników czy tylko dla kompilatora?
+
+**G (Deletion Wizard)**: `namespace.md` — usunąć. Nie archiwizować, usunąć. Treść implementacyjna jest w `archDetail.md`. Treść językowa powinna być w `langDetail.md`. Archiwum historyczne które i tak nikt nie czyta to hoardowanie dokumentów.
+
+**H (Accidental Manager)**: Status na dokumentach powinien być automatycznie śledzony przez CI. Jeśli nie ma CI, powinien być aktualizowany przy każdym merge'u. Definition of done: zmiana implementacji = zmiana statusu w docs. Backlog: ticket na dodanie docs-check do merge checklist.
+
+### Perspective Summary
+`namespace.md` to zombie-proposal: opisuje plan który był już wdrożony przez miesiąc. Powinno być wyraźnie oznaczone jako "zaimplementowane" lub przeniesione do historii — ale krytyczne examples (aliasy namespace) muszą najpierw wylądować w `langDetail.md`. `langExtensionMacro.md` urwał się przy §9.2 i brakuje kompletnego opisu `pack`/`unpack!` który według `changeProposal.md` ma status MVP. Priorytet: (1) status namespace.md, (2) przenieść alias examples do langDetail, (3) sekcja pack w langExtensionMacro.
+
+---
+
+## 6. `archIntro.md` — stara lista plików; `archDetail.md` — drobne luki
+
+### Consensus Leader: D (Senior C++ Abomination)
+
+### Summary
+`archIntro.md` (stan 2026-04-12) ma sekcję §3 "Struktura plików" która jest fork'iem §2 w `archDetail.md` z datą 2026-05-13. Różnica: `archIntro.md` nie wymienia: `parser-base.js`, `parser-exprs.js` (parser split na 3 pliki), `type-infer.js`, `ast-renderer.js`, `ast-to-source.js`, `defer-pass.js`, `source-ref.js`, `source-buffer.js`, `vfs.js`, `file-tree.js`, `project-ui.js`, `examples.js`, `source-registry.js`. Lista kompilatora jest z przed-split'u parsera i przed-split'u typecheckera. `archIntro.md` diagnogram pipeline jest niekompletny: nie pokazuje `deferPass`. `archDetail.md` jest najaktualniejszym plikiem projektu i jest w dużej mierze poprawny — drobna luka: §12 Testy regresji nie wymienia `test-ast-renderer.js`, `test-vfs.js`, `test-ide-smoke.js`, `test-ide-ui.js`, `test-ide-logic.js`. Pipeline diagram sekcji §3 używa `typechecker.js` jako label fazy 3 — po refaktorze to barrel file; właściwy plik to `staticTypeChecker.js`, ale to jest wewnętrzna informacja poprawnie wyjaśniona w §6.
+
+### Required Changes
+- `archIntro.md` §3 Struktura plików: aktualizacja listy kompilatora (dodać `parser-base.js`, `parser-exprs.js`, `type-infer.js`, `ast-renderer.js`, `ast-to-source.js`, `defer-pass.js`, `source-ref.js`, `source-buffer.js`) i listy IDE (`vfs.js`, `file-tree.js`, `project-ui.js`, `examples.js`)
+- `archIntro.md` §2 Pipeline diagram: dodać strzałkę `deferPass(ast)` między `typecheck` a `generate`
+- `archIntro.md` zaktualizować datę "Stan na:"
+- `archDetail.md` §12: dodać brakujące pliki testowe do listy
+
+### Observations
+- `archIntro.md` i `archDetail.md` mają zdublowaną sekcję "Struktura plików" — można rozważyć odesłanie z intro do detail zamiast utrzymywania 2 kopii
+- `archDetail.md` §3 diagram pipeline poprawnie pokazuje `deferPass` jako osobną strzałkę — tylko `archIntro.md` tego nie ma
+- `archDetail.md` §6 poprawnie dokumentuje split typecheckera (TypeInferBase, TypeChecker, barrel typechecker.js) — nie ma tu błędu, tylko niespójność z diagramem wyżej
+- `archIntro.md` wzmiankuje `compiler/pipeline.js` poprawnie i `liveCompile()` — ta część jest aktualna
+
+### Concrete Actions
+- `archIntro.md` sekcja compiler — podmienić całą listę plików kompilatora na aktualną z `archDetail.md` (kopiuj, skróć opisy do jednej linii)
+- `archIntro.md` sekcja IDE — dodać `vfs.js`, `file-tree.js`, `project-ui.js`, `examples.js` z jednozdaniowym opisem
+- `archIntro.md` big picture pipeline — dodać krok między typecheck a generate:
+  ```
+      ▼  deferPass(ast)     ← defer-pass.js  (rewrite DeferStmt → inline)
+  Typed AST (bez DeferStmt)
+  ```
+- `archDetail.md` §12: uzupełnić listę plików testowych o wszystkie brakujące
+
+### Needs Deeper Analysis
+- Czy `archIntro.md` ma sens jako osobny plik skoro `archDetail.md` ma §1 Filozofia i §2 Struktura która jest kompletna? Może `archIntro.md` powinno być po prostu krótkim "quick orientation" (5-10 linii + link) zamiast 114-liniowym plikiem z duplikatami?
+
+---
+
+### Best Value to Noise Perspectives' Commentary
+
+**D (Senior C++ Abomination)**: Lista plików IDE w `archIntro.md` jest najgorsza — nie ma VFS i multi-file project które są największą funkcjonalnością dodaną od ostatniej aktualizacji. Ktoś kto wchodzi do projektu po raz pierwszy dostaje fałszywy obraz że IDE to tylko edytor z podświetlaniem.
+
+**J (Cognitive Scientist)**: Dwa pliki architektoniczne z różnymi datami aktualności to cognitive overload navigation. Użytkownik nie wie który jest "bardziej prawdziwy". Jasna hierarchia: "intro = nawigacja, detail = prawda" musi być explicite w README i na górze każdego pliku.
+
+**A (Assembler Pragmatist)**: Defer pass: jeden krok, jedno wejście, jedno wyjście. Dodanie go do diagramu to dosłownie jedna linia tekstu. Zrób to teraz.
+
+**C (Corporate Java Architect)**: §12 Testy regresji w `archDetail.md` powinno być generowane automatycznie (np. przez skrypt listy `tests/test-*.js`) żeby nie rozjeżdżało się z rzeczywistością. Manual maintenance tabeli = guaranteed drift.
+
+**B (Open-Source Paradigm Challenger)**: Barrel file `typechecker.js` to anti-pattern w Zig/Rust world. W JS to dość normalne. Ale warto to explicite zaznaczyć w docs jako "dla backward compat" żeby przyszły maintainer nie skasował go myśląc że to dead code.
+
+---
+
+### Rejected Perspectives' Commentary
+
+**G (Deletion Wizard)**: Usunąć `archIntro.md`, sekcja "Quick orientation" w README wystarczy. Dwa pliki = dwa miejsca do aktualizacji = gwarantowany drift. `archDetail.md` ma już §1 Filozofia które jest lepszym intro.
+
+**E (Lisp/Haskell Pipeline Fanatic)**: Pipeline diagram powinien pokazywać typy na każdej strzałce — `Source → Token[] → AST → TypedAST → DeferAST → WatModule + SSpans → Bytes + Spans`. To jest precyzyjny opis przepływu danych. Obecny diagram mówi "co się dzieje" ale nie "jakie typy przepływają".
+
+**F (Confused Junior)**: Skąd mam wiedzieć kiedy czytać `archIntro.md` a kiedy `archDetail.md`? README mówi: najpierw intro, potem detail. OK, ale intro jest stare. Czytam stare intro → mam stary obraz → czytam detail → muszę "odczynnić" to co przeczytałem. Może najpierw dać warning w intro że detail jest bardziej aktualny?
+
+### Perspective Summary
+`archIntro.md` jest 30+ dni za `archDetail.md` — dwie najbardziej zauważalne luki to: pominięty split parsera (3 pliki zamiast 1) i brak `deferPass` w diagramie pipeline. To nie są kosmiczne zmiany a efekt jest taki że dokument daje fałszywy obraz architektury. `archDetail.md` jest w dobrej kondycji z drobnymi lukami w liście testów. Strategicznie: rozważyć czy `archIntro.md` w ogóle ma rację bytu jako osobny plik — alternatywnie to mógłby być jeden akapit "quick overview" w README.
+
+---
+
+## 7. `ide.md` — marginalnie nieaktualny; `wayOfWork.md` — tabela komponentów stara
+
+### Consensus Leader: D (Senior C++ Abomination)
+
+### Summary
+`ide.md` jest najaktualniejszym plikiem dokumentacyjnym (stan 2026-05-13) i pokrywa wszystkie istotne feature IDE w tym multi-file project, VFS, debugger, hover, autocomplete, breakpoints. Drobna nieaktualność: §2 editor wzmiankuje parametr `lastErrorRange` przekazywany z Tab/Shift+Tab do `applyHighlight()` — po przejściu na canonical-ref highlights `lastErrorRange` może być martwym parametrem. `wayOfWork.md` §11 tabela "Istniejące komponenty" nie zawiera `<qlang-file-tree>` i nie ma zaktualizowanego API `<qlang-console>` (plik opisuje `log()`, `clear()` ale nie `write()`, `startInput(cb)`, `cancelInput()`). `<qlang-source-view>` w tabeli nie pokazuje pełnego API (brakuje `getEditorLine`, `setSelectionRange`, `getSelectionOffsets`). Ponieważ `wayOfWork.md` to filozofia i meta-zasady, lista komponentów jest tam semantycznie nie na miejscu i powinna zostać przeniesiona do `ide.md`.
+
+### Required Changes
+- `wayOfWork.md` §11 tabela komponentów: dodać `<qlang-file-tree>` z API `setFiles()`, zdarzeniami `ft-file-*`, `ft-project-*`
+- `wayOfWork.md` §11: zaktualizować `<qlang-console>` API o `write()`, `startInput(cb)`, `cancelInput()`
+- `wayOfWork.md` §11 lub `ide.md`: przenieść tabelę komponentów do `ide.md` — `wayOfWork.md` to zasady pracy, nie reference do API
+
+### Observations
+- `ide.md` §2 wzmiankuje `lastErrorRange` przy Tab key — weryfikacja w `main.js`/`editor.js` czy ten parametr jest nadal przekazywany, czy usunięty po canonical-ref refaktorze
+- `ide.md` §2 wzmiankuje `execCommand('insertText', ...)` dla auto-indent — `execCommand` jest deprecated w modern browsers (Firefox/Chrome ostrzegają w konsoli); to implementacyjna kwestia, nie doc-kwestia, ale warta notatki
+- `ide.md` jest jedynym plikiem który poprawnie dokumentuje SharedArrayBuffer 7-state protocol — ta informacja jest krytyczna dla przyszłego maintainera debuggera
+- `wayOfWork.md` §10 "skupiaj sie bardziej na testach smoke'owych" — spójne z istniejącym `test-ide-smoke.js`
+
+### Concrete Actions
+- Dodać do `wayOfWork.md` §11 tabeli: `<qlang-file-tree>` row
+- Zaktualizować `wayOfWork.md` §11 `<qlang-console>` API: `write(text)`, `log(msg)`, `clear()`, `startInput(cb)`, `cancelInput()`
+- Dodać notę w `ide.md` §2 editor przy auto-indent: "Implementacja przez `execCommand` (deprecated) — kandydat do zastąpienia `insertText`-based API"
+
+### Needs Deeper Analysis
+- `lastErrorRange` w Tab handler — czy `applyHighlight()` bez argumentów (po canonical-ref zmianach) nadal przyjmuje `lastErrorRange`? Jeśli nie, parametr jest redundantny w opisie
+
+---
+
+### Best Value to Noise Perspectives' Commentary
+
+**D (Senior C++ Abomination)**: `ide.md` jest w dobrej kondycji — najrzadziej widuje się dokumentację IDE która faktycznie opisuje wewnętrzny protocol współdzielonej pamięci. SharedArrayBuffer 7-state protocol jest dobrze udokumentowany. Nie psuć.
+
+**J (Cognitive Scientist)**: Przenosiny tabeli komponentów z `wayOfWork.md` do `ide.md` to właściwy ruch — "zasady pracy" i "reference API" to różne cognitive contexts. Użytkownik szukający jak używać `<qlang-console>` nie szuka go w pliku o filozofii projektu.
+
+**A (Assembler Pragmatist)**: `execCommand` deprecated — prawda. Ale działa. Nie naprawiać dopóki nie zepsute. Nota w docs wystarczy.
+
+**C (Corporate Java Architect)**: API dokumentacja komponentów powinna mieć tabelę: metoda, parametry, return, zdarzenia. Obecny format to niestrukturyzowany opis. Dla 8 komponentów structured table byłaby wielokrotnie bardziej użyteczna.
+
+**K (Reluctant Manual Tester)**: `startInput(cb)` w `<qlang-console>` — czy `cb` jest wywoływane z całym stringiem czy z poszczególnymi znakami? Dokumentacja nie mówi. Assumption bug.
+
+---
+
+### Rejected Perspectives' Commentary
+
+**G (Deletion Wizard)**: §10 w `ide.md` — "→ Patrz archDetail.md sekcja 9 — dokumentacja renderowania bytecode" — to jest stub, nie dokumentacja. Albo napisać sekcję w `ide.md`, albo usunąć reference i przenieść opis do `archDetail.md` where it linki bezpośrednio.
+
+**E (Lisp/Haskell Pipeline Fanatic)**: `highlight.js` jest opisany jako "koordynator" — ale nie ma diagrama przepływu zdarzeń. Kto wywołuje `highlightAndScrollSource`? Kto wywołuje `clearAll`? Bez event flow diagram to jest lista metod bez kontekstu.
+
+**H (Accidental Manager)**: Backlog: (1) przenieść tabelę komponentów, (2) zaktualizować API, (3) nota o execCommand. Trzy godziny pracy razem. Done criteria: `wayOfWork.md` nie zawiera implementation reference, `ide.md` ma kompletną tabelę komponentów.
+
+### Perspective Summary
+`ide.md` jest w najlepszej kondycji ze wszystkich plików dokumentacyjnych — jedyna akcja to drobne korekty i nota o `execCommand`. `wayOfWork.md` ma stale komponentów która jest miejscem semantycznie złym (filozofia pracy ≠ API reference) i jest 1 iterację za aktualnością. Kluczowe: przenieść tabelę do `ide.md`, zaktualizować API `<qlang-console>` i dodać `<qlang-file-tree>`.
+
+---
+
+## 8. `README.md` — entry point kłamie; `docs/history/` — jeden otwarty status
+
+### Consensus Leader: B (Open-Source Paradigm Challenger)
+
+### Summary
+`README.md` jest minimalistyczny i dobry — ale jeden krytyczny błąd: "*Open `index.html` in a browser*" nie działa bez `SharedArrayBuffer` który wymaga COOP/COEP headers, a te są serwowane tylko przez `node start.js`. Użytkownik otwierający `index.html` bezpośrednio dostanie błąd instancjacji WASM (lub cichy brak input/debugger). `docs/history/changeProposal.md` item 1 (two-pass typecheck/expand) nie ma żadnej `STATUS:` noty mimo że items 2, 3, 4, 5, 9 mają. Item 7 (slice) i 8 (generics) są explicite deferred. Item 1 wygląda więc jak "w toku" gdy de facto jest też deferred. `docs/history/resilientParserPlan.md` jest kompletnie zarchiwizowanym dokumentem — wszystkie milestony M0–M9 ✅. `changeProposal.md` item 4 (void) ma `STATUS: PARTIALLY IMPLEMENTED — discard warning not yet added` — to jest nadal aktualne.
+
+### Required Changes
+- `README.md`: zmienić "*Open `index.html` in a browser*" na:
+  ```
+  ## Development server
+  node start.js   — starts server with COOP/COEP headers (required for SharedArrayBuffer)
+  Then open: http://localhost:PORT
+  
+  Direct file:// access does not work (missing SharedArrayBuffer headers).
+  ```
+- `changeProposal.md` item 1: dodać `> STATUS: DEFERRED — requires scope-snapshot at MacroCallStmt; deferred until macro system is more stable.`
+
+### Observations
+- `README.md` reading order nie wymienia `wayOfWork.md`, `namespace.md`, `langExtensionMacro.md` — to jest świadoma decyzja (nie alle-hands dokumenty w README) czy przeoczenie? Prawdopodobnie świadoma — OK
+- `changeProposal.md` item 4 (void) — partial: `void` i `return;` zaimplementowane, discard warning NIE. To jest bug-worthy future task — można dodać jako Concrete Action w osobnym issue
+- `changeProposal.md` item 6 (`T::of` reserved) jest documentation-only change — nadal aktualny i nie wymaga kodu
+- `resilientParserPlan.md` jest czystą historią — nic do zmiany
+
+### Concrete Actions
+- `README.md`: zaktualizować sekcję "Entry point" z instrukcją uruchomienia przez `node start.js`
+- `changeProposal.md` item 1: dodać STATUS: DEFERRED note
+- `changeProposal.md` item 4: zaktualizować STATUS na: `STATUS: MOSTLY IMPLEMENTED — void return type, return;, void codegen live. Discard warning (ExprStmt non-void) still missing.`
+
+### Needs Deeper Analysis
+- Czy `start.js` serwuje na stałym porcie? README nie podaje portu — sprawdzić `start.js` i podać w README.
+
+---
+
+### Best Value to Noise Perspectives' Commentary
+
+**B (Open-Source Paradigm Challenger)**: README jako kontrakt z użytkownikiem — "open index.html" jest złamanym kontraktem. Pierwsze 5 minut projektu jest zdeterminowane przez README. Naprawić przed wszystkim innym.
+
+**K (Reluctant Manual Tester)**: Otwierałem `index.html` bezpośrednio i nie działał debugger — dokładnie to co council opisuje. To jest assumption bug numer 1 w projekcie. Nowy użytkownik zakłada że "plik HTML = otwórz w przeglądarce". Nie tutaj.
+
+**J (Cognitive Scientist)**: README jest gateway document — 6 linii o strukturze, 3 linii o testach, 2 linijki o entry point. Krótki README jest dobry. Ale te 2 linijki o entry point są błędne. One mistake in the first thing they read.
+
+**A (Assembler Pragmatist)**: `start.js` — sprawdzić port. Jeśli hardcoded to dać wprost w README. Jeśli dynamiczny — dać `node start.js` i powiedzieć że wypisze port.
+
+**D (Senior C++ Abomination)**: `changeProposal.md` item 1 (two-pass) — to jest architecturally highest-value deferred feature. Kiedy to wdrożymy, `typeof(x)` w `#if` stanie się możliwe i system makr skoczy o order of magnitude. Warto zostawić jako "deferred" z explicite powodem dlaczego jeszcze nie.
+
+---
+
+### Rejected Perspectives' Commentary
+
+**G (Deletion Wizard)**: `docs/history/changeProposal.md` — usunąć. Historia decyzji jest w gitlogu. Utrzymywanie tego pliku to cargo cult archiwizacji.
+
+**H (Accidental Manager)**: README powinno mieć sekcję "Contributing" z linkiem do `wayOfWork.md`. Done criteria dla każdego PR: aktualizacja docs, aktualizacja tests, aktualizacja README jeśli zmiana entry point.
+
+**C (Corporate Java Architect)**: `changeProposal.md` powinno mieć structured YAML header: `status: deferred|implemented|open|cancelled` per item. Wtedy automatycznie parsowalne. Markdown table z kolumnami jest minimum.
+
+### Perspective Summary
+README ma jeden krytyczny błąd który uderza każdego nowego użytkownika: `index.html` w file:// nie działa bez serwera. To jest fix który można zrobić w 3 minuty i powinien być zrobiony natychmiast. `changeProposal.md` item 1 (two-pass typecheck) powinno dostać STATUS: DEFERRED żeby status był spójny z innymi itemami w pliku. Reszta docs/history jest albo poprawnie zarchiwizowana (resilientParserPlan) albo ma aktualne notatki statusu.
+
+---
+
+## Council Verdict — Sesja 2026-05-13
+
+### 3 Big Bets
+1. **Naprawić `langDetail.md` i `langIntro.md`** — brakujący `defer`, `break`, `pack`/`unpack!`, literały znakowe; krytyczny błąd faktyczny `arr[i]` → `arr.[i]`; te pliki są głównymi referencjami języka i muszą być aktualne
+2. **Zakończyć `namespace.md` jako zombie-proposal** — zmienić status na ZAIMPLEMENTOWANE lub przenieść do `docs/history/`; przenieść examples alias namespace do `langDetail.md`
+3. **README entry point fix** — 3-minutowa zmiana która eliminuje confusion każdego nowego użytkownika
+
+### 3 Things to Keep
+1. **`archDetail.md`** jako primary source of truth o architekturze — najaktualniejszy, najdokładniejszy, pokrywa all layers; drobne aktualizacje wystarczą
+2. **`ide.md`** jako wyjątkowo dobry przykład IDE documentation — SharedArrayBuffer protocol, autocomplete trzy tryby, breakpoint semantics — rzadko spotykana jakość
+3. **`changeProposal.md`** w `docs/history/` jako decision log — invaluable dla przyszłych maintainerów którzy będą pytać "dlaczego tak nie zrobiliśmy" przy item 1 (two-pass), 7 (slice), 8 (generics)
+
+### 3 Things to Kill
+1. **`arr[i]` w przykładach dokumentacji** — stara składnia, już usunięta z parsera, natychmiastowy grep i podmiana
+2. **"Stan na: 2026-04-12"** jako data w `langDetail.md`, `langIntro.md`, `archIntro.md` — daty które kłamią są gorsze niż brak dat; albo aktualizować przy każdej zmianie albo usunąć z headerów
+3. **Tabela komponentów w `wayOfWork.md`** — semantycznie nie na miejscu (filozofia pracy ≠ API reference), stale, przenieść do `ide.md`

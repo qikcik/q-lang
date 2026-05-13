@@ -89,57 +89,6 @@ Każda nowa funkcjonalność wymaga testów obejmujących: poprawny przypadek, b
 
 ---
 
-## 11. Framework tworzenia funkcjonalności IDE (Web Components)
+## 11. Nowe funkcjonalności IDE
 
-Nowa funkcjonalność UI jest realizowana jako **mały, wyspecjalizowany Web Component** (Light DOM). Wzorzec jest powtarzalny i dokumentowany poniżej jako receptura.
-
-### Wzorzec komponentu
-
-```
-class QLangXxx extends HTMLElement {
-  connectedCallback() {
-    if (this._built) return;   // guard — tylko raz
-    this._built = true;
-    this._pre = this.querySelector('pre') ?? ...; // adopt existing children
-    // setup: listeners, initial state
-  }
-
-  // Semantic API (metody, nie bezpośrednia manipulacja DOM)
-  setData(data) { ... }
-  clear() { ... }
-
-  // Semantic events (bubbling CustomEvent z detail)
-  // this.dispatchEvent(new CustomEvent('ql-xxx', { bubbles: true, detail: {...} }));
-}
-customElements.define('qlang-xxx', QLangXxx);
-```
-
-### Zasady
-
-1. **Light DOM** — zero Shadow DOM. Komponent adoptuje istniejące dzieci z HTML (np. `<pre>`), nie tworzy nowych struktur DOM.
-2. **Mały rozmiar** — optymalnie 30–70 linii. Jeden plik = jedna odpowiedzialność. Jeśli rośnie ponad 100 — rozbij.
-3. **Semantic API** — komponent eksponuje metody (`setErrors()`, `log()`, `clear()`), nie wymaga wiedzy o wewnętrznej strukturze DOM.
-4. **Semantic events** — komponent dispatches zdarzenia z prefiksem `ql-` (`ql-error-click`, `ql-compile`), a nie surowe kliknięcia.
-5. **Graceful degradation** — `main.js` wiąże się z komponentem przez `?.` : `if (component?.method) component.method(); else legacyFallback();`. UI działa nawet gdy komponent nie jest zarejestrowany.
-6. **Adopcja dzieci** — komponent nie kasuje istniejących elementów HTML; adoptuje je (`this.querySelector(...)`) i nadaje im zachowanie.
-
-### Pipeline dodawania nowej funkcjonalności UI
-
-```
-1. Specyfikacja    — co komponent robi, jakie API, jakie eventy
-2. Plik komponentu — ide/qlang-xxx.js  (30–70 linii)
-3. HTML            — <qlang-xxx> owijający istniejące elementy w index.html
-4. Wire            — main.js importuje komponent, nasłuchuje eventów, z fallbackiem
-5. Testy smoke     — test-ide-smoke.js: plik istnieje, ID w HTML, tag w HTML
-6. Dokumentacja    — ide.md: opis komponentu, API, eventy
-```
-
-### Istniejące komponenty
-
-| Komponent | Plik | Rozmiar | API | Eventy |
-|---|---|---|---|---|
-| `<qlang-source-view>` | `source-view.js` | ~450 | `setText`, `setContent`, `hoverData=`, `setBpLines`, `highlightNode` | `sv-gutter-click`, `sv-node-click` |
-| `<qlang-pane>` | `qlang-pane.js` | ~40 | (strukturalny wrapper) | — |
-| `<qlang-toolbar>` | `qlang-toolbar.js` | ~33 | (interceptuje kliknięcia) | `ql-compile`, `ql-run`, `ql-debug`, `ql-clear` |
-| `<qlang-error-panel>` | `qlang-error-panel.js` | ~73 | `setErrors()`, `log()`, `clear()` | `ql-error-click` |
-| `<qlang-console>` | `qlang-console.js` | ~34 | `log()`, `clear()` | — |
+Nowa funkcjonalność UI jest realizowana jako mały, wyspecjalizowany Web Component (Light DOM). Wzorzec, zasady i pipeline dodawania: → [ide.md](ide.md) §13.

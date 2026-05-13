@@ -6,6 +6,8 @@
 
 ## 1. Two-pass typecheck/expand
 
+> **STATUS: DEFERRED** — requires scope-snapshot at each `MacroCallStmt` site; deferred until macro system is more stable. See Option B in §Risk below.
+
 **Motivation:**
 - Today: `expand()` runs before `typecheck()`, so `_type` is not set on AST nodes during expansion → `typeof(x)` in `#if` is impossible.
 - Today: a `MacroError` kills all LSP hints for the entire file, even for code outside macros.
@@ -65,7 +67,7 @@ to:
 
 ## 4. `void` return type + discard warning
 
-> **STATUS: PARTIALLY IMPLEMENTED** — `void` return type, bare `return;`, and void codegen are live. Discard warning for non-void `ExprStmt` not yet added.
+> **STATUS: PARTIALLY IMPLEMENTED** — `void` return type, bare `return;`, and void codegen are live. Discard warning for non-void `ExprStmt` (calling a non-void function as a statement) not yet added.
 
 **Motivation:** QLang is side-effect heavy and currently has no `void` type. Functions that exist only for their side effects must declare an arbitrary return type or use `_ := f()` as a discard pattern — both are unnatural.
 

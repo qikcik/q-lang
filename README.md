@@ -18,6 +18,22 @@ ide/        — browser IDE (editor, highlight, debugger, macro panels)
 tests/      — test suite (run: node tests/test.js)
 ```
 
+## Running the IDE
+
+The IDE requires [`SharedArrayBuffer`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer), which needs COOP/COEP headers. Open in the browser via the dev server:
+
+```
+node start.js
+```
+
+Then navigate to `http://localhost:8000`. Opening `index.html` directly as a `file://` URL will **not** work (SharedArrayBuffer blocked).
+
+## Running tests
+
+```
+node tests/test.js
+```
+
 ## Running tests
 
 ```sh

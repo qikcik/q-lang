@@ -1,7 +1,7 @@
 # QLang — Rozszerzenie: System Makr (v1)
 
 > Uzupełnienie do [langDetail.md](langDetail.md)
-> Stan na: 2026-04-09 (aktualizacja: SourceBuffer + macro-expander split)
+> Stan na: 2026-05-13 (aktualizacja: `unpack!` §10, `pack` kind)
 
 ---
 
@@ -239,6 +239,69 @@ swap := macro(a : expr, b : expr, T : type) {
 };
 
 // użycie:
+x : mut i32 = 3;
+y : mut i32 = 7;
+swap!(x, y, i32);   // x == 7, y == 3
+```
+
+---
+
+## 10. Wbudowane makro `unpack!` — iteracja po pakiecie wartości
+
+`unpack!` jest wbudowanym makrem rozumianym bezpośrednio przez ekspander (nie user-defined).
+Pozwala iterować po **literale pakietu `[e1, e2, ...]`** — liście wartości znanych w czasie kompilacji.
+Odpowiada compile-time unrollowi pętli.
+
+### Składnia
+
+```
+unpack!(vals, iterName, { body });
+```
+
+- `vals` — argument rodzaju `pack`: literał `[e1, e2, ...]` lub `@param` gdzie parametr ma rodzaj `pack`
+- `iterName` — nowa nazwa zmiennej iteracji (rodzaj `ident`)
+- `{ body }` — blok instrukcji; każdy element jest podstawiany w miejsce `iterName` (rodzaj `block`)
+
+Expander generuje N kopii `body` — po jednej na każdy element pakietu.
+
+### Przykład — sumowanie z literału pakietu
+
+```
+sum : mut i32 = 0;
+unpack!([10, 20, 30], val, {
+    sum = sum + val;
+});
+// sum == 60
+```
+
+`unpack!` rozwija się statycznie do:
+```
+sum = sum + 10;
+sum = sum + 20;
+sum = sum + 30;
+```
+
+### Przekazywanie pakietu przez makro
+
+Makro przyjmuje pakiet jako parametr rodzaju `pack` i przekazuje go do `unpack!` przez `@param`:
+
+```
+sum_all := macro(vals : pack) {
+    $total : mut i32 = 0;
+    unpack!(@vals, $v, {
+        $total = $total + $v;
+    });
+};
+
+// użycie:
+sum_all!([5, 10, 15]);   // $total == 30 wewnątrz makra
+```
+
+### Ograniczenia v1
+
+- `vals` musi być literałem pakietu `[e, e, ...]` lub `@param` wskazującym na parametr rodzaju `pack`
+- Goły identyfikator zamiast `@param` (np. `unpack!(arr, v, {...})`) jest błędem kompilacji z komunikatem diagnostycznym
+- Brak zagnieżdżonych `unpack!` iterujących ten sam pakiet w tej samej funkcji (gensym `$v` koliduje)
 a : mut i32 = 1;
 b : mut i32 = 2;
 swap!(a, b, i32);
