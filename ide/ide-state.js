@@ -12,6 +12,7 @@ let _lastLineIndex   = null;
 let _lastErrorRange  = null;
 let _lastErrorRanges = [];
 let _lastErrorInfo   = null;
+let _lastImportEnv   = new Map();
 
 export function setExpLog(log)         { _expLog          = log ?? null; }
 export function getExpLog()            { return _expLog; }
@@ -30,3 +31,5 @@ export function setLastErrorRanges(rs) { _lastErrorRanges = rs ?? []; _lastError
 export function getLastErrorRanges()   { return _lastErrorRanges;  }
 export function setLastErrorInfo(info) { _lastErrorInfo   = info;  }
 export function getLastErrorInfo()     { return _lastErrorInfo;    }
+export function setLastImportEnv(env)  { _lastImportEnv  = env ?? new Map(); }
+export function getLastImportEnv()     { return _lastImportEnv;    }

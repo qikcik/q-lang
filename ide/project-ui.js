@@ -36,12 +36,6 @@ export function initProjectUI({
   function _loadFileIntoEditor(path, proj) {
     const content = proj.getFile(path) ?? '';
     mainSv.setText(content);
-    const noticeEl = tabBar?.querySelector('.tab-bar-notice');
-    if (noticeEl) {
-      const isNonMain = path !== 'main.qlang';
-      noticeEl.hidden = !isNonMain;
-      if (isNonMain) noticeEl.textContent = `Editing ${path} — only main.qlang is compiled`;
-    }
   }
 
   function _switchToFile(path, proj = vfs.activeProject) {
@@ -52,6 +46,7 @@ export function initProjectUI({
     _renderTabs(proj);
     if (fileTreeEl) fileTreeEl.activePath = path;
     _loadFileIntoEditor(path, proj);
+    triggerLiveCompile();
   }
 
   function _renderTabs(proj) {
@@ -73,8 +68,7 @@ export function initProjectUI({
     }
     const notice = document.createElement('span');
     notice.className = 'tab-bar-notice';
-    notice.hidden = proj.activeFile === 'main.qlang';
-    notice.textContent = `Editing ${proj.activeFile} — only main.qlang is compiled`;
+    notice.hidden = true;
     tabBar.appendChild(notice);
   }
 
@@ -87,7 +81,7 @@ export function initProjectUI({
     }
     _renderTabs(proj);
     _loadFileIntoEditor(proj.activeFile, proj);
-    triggerLiveCompile(getCompileSource());
+    triggerLiveCompile();
   }
 
   // ── File tree events ──────────────────────────────────────────────────────

@@ -54,6 +54,18 @@ export class SourceBuffer {
   }
 
   /**
+   * Create a source buffer for an imported file.
+   * @param {string}    filename — e.g. 'utils.qlang'
+   * @param {string}    text     — full source text of the file
+   * @param {Token[]|null} tokens — pre-computed tokens (avoids double tokenization)
+   */
+  static forFile(filename, text, tokens = null) {
+    const buf = new SourceBuffer(filename, text, 'user', null);
+    if (tokens != null) buf._tokens = tokens;
+    return buf;
+  }
+
+  /**
    * Create a macro-expansion source buffer.
    *
    * @param {string}  id        — e.g. 'macro:for_each:main:42'

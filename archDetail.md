@@ -1,6 +1,6 @@
 # QLang — Architektura Szczegółowa
 
-> Stan na: 2026-05-13 (aktualizacja: **`else if`** w parserze; **unary minus (`-`)** w parser/typeinfer/emitter; Worker-based Run+Debug via wasm-runner.js; 7-state SharedArrayBuffer protocol; konsola kolorowa; Stop w toolbarze; dbg-stop usunięty; **`defer`** — naprawa flushu przy zagnieżdżonych `return` w `defer-pass.js`; **`collectLocalDecls`** — deduplicacja węzłów AST współdzielonych przez defer-pass; **multi-file project** — VFS, file-tree, tab bar, "Open project" dropdown)
+> Stan na: 2026-05-13 (aktualizacja: **`else if`** w parserze; **unary minus (`-`)** w parser/typeinfer/emitter; Worker-based Run+Debug via wasm-runner.js; 7-state SharedArrayBuffer protocol; konsola kolorowa; Stop w toolbarze; dbg-stop usunięty; **`defer`** — naprawa flushu przy zagnieżdżonych `return` w `defer-pass.js`; **`collectLocalDecls`** — deduplicacja węzłów AST współdzielonych przez defer-pass; **multi-file project** — VFS, file-tree, tab bar, "Open project" dropdown; **namespace file imports** — `NamespaceImport`, `compileMulti` / `liveCompileMulti`, multi-file codegen; **autocomplete** — `importEnv` w ide-state, importowane namespace'y i sub-namespace'y; **qualified type annotations** — `QualifiedTypeRef` w `parseType()` + `resolveType()`; wykluczone built-in skalary z autocomplete namespace'y)
 > Iteracyjnie uzupełniana przy każdym zrealizowanym todo.
 > Wprowadzenie i big picture: [archIntro.md](archIntro.md)
 
@@ -37,9 +37,9 @@ ide/
   layout.js              — Resize handlerów (col/row-handle), drag & drop paneli, zwijanie/rozwijanie
   crossSelection.js      — Cienki re-export shim (~25 linii): setStmtMap, enclosingStmt, highlightSourceRange
   highlight.js           — Koordynator podświetleń: highlightAndScrollSource, applyChainHighlights, clearAll
-  ide-state.js           — Pasywny store: setExpLog/getExpLog, setLast*/getLast* (zero zależności)
+  ide-state.js           — Pasywny store: setExpLog/getExpLog, setLast*/getLast*, setLastImportEnv/getLastImportEnv (zero zależności)
   source-registry.js     — Rejestr SourceBuffer + widoków; registerView, getView, highlightInSource
-  lsp.js                 — Narzędzia edytora: autocomplete (3 tryby: general/dot/::), getScopeItems, resolveChainedType, syncAstHighlight
+  lsp.js                 — Narzędzia edytora: autocomplete (3 tryby: general/dot/::), getScopeItems (obsługuje NamespaceImport → alias jako 'namespace'), getNamespaceMembers (Case A: alias importu → sub-namespace'y + funcs; Case B: sub-namespace z importEnv), resolveChainedType, syncAstHighlight; re-eksportuje setLastImportEnv
   editor.js              — contenteditable helpery: getEditorText, getCaretOffset/setCaretOffset, getSelectionOffsets, setSelectionRange, getEditorLine
   hover.js               — Hover data builder: HINTS (statyczne definicje), buildHoverData (AST walker)
   macro-panel.js         — Manager paneli makr; +lens buttons; inner +lens; close-all na recompile
@@ -57,7 +57,7 @@ compiler/
   staticAnalysis.js      — Typy pomocnicze: TypeError, Scope, typeEq, typeStr, isNumeric, isStruct, buildStructType…
   type-infer.js          — TypeInferBase — wszystkie metody infer*() w izolacji
   staticTypeChecker.js   — TypeChecker extends TypeInferBase (check*) + typecheck() + liveTypecheck()
-  pipeline.js            — Punkt wejścia faz 1–3: compile(src) → { tokens, ast, expLog, parseErrors }; liveCompile(src, opts)
+  pipeline.js            — compile(src) [alias → compileMulti]; compileMulti(src, getFile) — primary multi-file compile z namespace imports, zwraca importEnv; liveCompile(src, opts); liveCompileMulti(src, getFile) — live multi-file, zwraca { ...liveCompile, importEnv }
   wasm-encoder.js        — Pomocniczy: LEB128, opcody, sekcje WASM
   wat-utils.js           — SExprBuilder, BUILTINS, canonType, BumpAllocator, HEAP_BASE
   defer-pass.js          — Faza 3b: AST rewrite pass — inline DeferStmt przed każdym ReturnStmt i przy fallthrough
@@ -269,9 +269,11 @@ Typy (`Type`, `ArrayType`) mają dodatkowe pole **`mut: bool`** — decyduje o m
 | `QualifiedName` | `segments: string[], args: Expr[]\|null, line, start, end` — `A::B::C(args?)` |
 | `NamespaceDecl` | `name: string, target: string[]\|null, line, start, end` — `std := namespace;` |
 | `NamespacedDecl` | `segments: string[], inner: FuncDecl\|VarDecl, line, start, end` — `std::foo := fn() ...` |
+| `NamespaceImport` | `alias: string, filename: string, line, start, end` — `m := namespace "math.qlang";` |
 | `StructDecl` | `name: string, fields: StructField[], line, start, end` |
 | `StructField` | `name: string, typeAnnot: TypeNode, mut: bool, defaultValue: Expr\|null, line, start, end` |
 | `UserTypeRef` | `name: string, mut: bool, line, start, end` — user-defined type ref w pozycji type annotation |
+| `QualifiedTypeRef` | `segments: string[], mut: bool, line, start, end` — kwalifikowana adnotacja typowa: `m::Vec2`, `a::b::T`; emitowana przez `parseType()` gdy po IDENT następuje `::` |
 | `TypeRef` | `name: string, line, start, end` — bare type name w wyrażeniu |
 | `MacroDecl` | `name, params: MacroParam[], body: MacroBody, bodyTokens: Token[], line, start, end` |
 | `MacroBody` | `tokens: Token[], line?, start?, end?` |
@@ -440,8 +442,8 @@ Pliki po refaktoryzacji:
 - `checkBlock()` zawsze tworzy nowy scope — zmienne nie wyciekają poza blok
 - `checkFuncDecl()` tworzy dodatkowy zakres dla parametrów (rodzic zakresu ciała)
 - Two-pass dla top-level: najpierw rejestracja sygnatur funkcji, potem sprawdzanie ciał
-- **3-pass dla top-level ze strukturami** — Pass 1: rejestracja sygnatur funkcji; Pass 1b: rejestracja placeholder `StructType`; Pass 2: sprawdzanie ciał i `StructDecl` (rozwijanie pól)
-- `resolveType(typeAnnot, errorNode)`: konwertuje `UserTypeRef` → resolved `StructType` przez scope lookup; fallback na `normalizeType` dla pozostałych
+- **4-pass dla top-level** — Pass 0: `NamespaceDecl` (aliasy) + `NamespaceImport` (rejestracja jako 'namespace' w scope z `mountNamespace` z importEnv); Pass 1a: rejestracja sygnatur `NamespacedDecl`+`FuncDecl`; Pass 1b: rejestracja placeholder `StructType`; Pass 2: sprawdzanie ciał i `StructDecl` (rozwijanie pól)
+- `resolveType(typeAnnot, errorNode)`: konwertuje `UserTypeRef` → resolved `StructType` przez scope lookup; `QualifiedTypeRef` → `scope.resolveQualified(segments)` — obsługuje alias expansion; fallback na `normalizeType` dla pozostałych
 - Lokalne `FuncDecl` w bloku: rejestrowane w scope i natychmiast type-checked (`checkStmt` obsługuje `FuncDecl`)
 - `checkFuncDecl` zapisuje/przywraca `currentReturnType` — bezpieczne dla zagnieżdżonych funkcji
 - **Shadowing jest błędem**: `Scope.define()` rzuca `TypeError` jeśli nazwa istnieje w bieżącym lub zewnętrznym scope
@@ -515,6 +517,45 @@ Typy jako plain objects, każdy z polem `mut: bool`:
 - Rejestrowana w `TypeChecker._registerBuiltins()` jako `__builtin__`
 - `inferCall` obsługuje zarówno `__func__` jak i `__builtin__`
 - Return type: `void` — `__builtin__` print zwraca `void`
+
+---
+
+## 6.3. Multi-file — `compileMulti` i `liveCompileMulti` (`compiler/pipeline.js`)
+
+### `compileMulti(src, getFile)`
+
+Główny punkt wejścia dla kompilacji multi-file.
+
+| Etap | Opis |
+|------|------|
+| Skanowanie `NamespaceImport` | Przechodzi top-level AST; dla każdego `NamespaceImport { filename }` rekurencyjnie wczytuje plik przez `getFile(filename)` |
+| Cykliczne importy | `visiting: Set<string>` — jeśli `filename` już jest w zbiorze, rzuca `Error("Circular import: '...'")`  |
+| Per-file typecheck | Każdy plik type-checkowany niezależnie z `_filePrefix` (np. `__f_math_qlang`) — prefiks zapewnia unikalne nazwy WASM globals/functions |
+| `importEnv: Map<filename, { scope, ast }>` | Wynik per-file typecheck; mapuje nazwę pliku na scope i typed AST |
+| TypeChecker Pass 0 głównego pliku | `mountNamespace(alias, importEnv[filename].scope)` — montuje scope importowanego pliku jako sub-namespace pod aliasem |
+| Merge AST | `importedBodies` (FuncDecl + NamespacedDecl z importowanych plików) dołączane do `ast.body` głównego pliku przed codegen |
+
+### `liveCompileMulti(src, getFile)`
+
+Live-compile dla IDE (nie rzuca, zbiera błędy).
+
+| Etap | Opis |
+|------|------|
+| `buildLiveImportEnv(src, getFile)` | Buduje `importEnv` bez `_filePrefix`; cykliczne importy — cicho pomija (`if (visiting.has(filename)) return`) zamiast rzucać |
+| `liveCompile(src, { importEnv })` | Type-checkuje główny plik z gotowym `importEnv`; zwraca `{ typeErrors, ... }` |
+| Brakujący plik / cykl | Plik nie trafia do `importEnv` → `liveTypecheck` generuje type error dla brakującego namespace — nigdy nie rzuca |
+| Zwraca | `{ ...liveCompile, importEnv }` — `importEnv` używany przez IDE dla autocomplete |
+
+### `QualifiedTypeRef` — resolve w typecheckerze
+
+`resolveType(typeAnnot, errorNode)` obsługuje `QualifiedTypeRef` przez `scope.resolveQualified(typeAnnot.segments)`:
+- `segments[0]` to alias (`m`) → `NamespaceImport` symbol → rozwiązuje w `importEnv` → sub-namespace ze strukturami importowanego pliku
+- Kolejne segmenty (`Vec2`) → namespace struktowy → `StructType`
+- Jeśli wynik nie jest `StructType` → `TypeError('... is not a type', errorNode)`
+
+### Autocomplete — wykluczenie built-in skalarów
+
+`getNamespaceMembers` (lsp.js) Case A iteruje `scope.namespaces.keys()` importowanego pliku. `_registerBuiltins()` rejestruje skalary (`i32`, `u8`, `bool`, ...) w każdym `globalScope.namespaces` — filtrowane przez `BUILTIN_NS` Set przed dodaniem do podpowiedzi.
 
 ---
 

@@ -1,6 +1,6 @@
 # QLang — Architektura (Wprowadzenie)
 
-> Stan na: 2026-05-13 (aktualizacja: defer-pass, resilient parser (3-tier split), type-infer split, multi-file VFS, file-tree, uzupełnienie listy plików i testów)
+> Stan na: 2026-05-13 (aktualizacja: defer-pass, resilient parser (3-tier split), type-infer split, multi-file VFS, file-tree, uzupełnienie listy plików i testów; **namespace file imports** — `NamespaceImport`, `compileMulti` / `liveCompileMulti`; **autocomplete** — importowane namespace'y przez `importEnv`)
 > Szczegółowa dokumentacja: [archDetail.md](archDetail.md)
 
 ---
@@ -42,12 +42,14 @@ Typed AST (bez DeferStmt)
 
 Fazy 1–3b (tokenize → parse → expand → typecheck → deferPass) są orkiestrowane przez `compiler/pipeline.js`:
 ```
-    compile(src)            ← pipeline.js  — zwraca { tokens, ast, expLog, parseErrors, mainSource }
-    │                          gdy parseErrors.length > 0: expand+typecheck+deferPass pominięte
-    │                          compile() włącza deferPass (rewrite DeferStmt) przed generate()
+    compileMulti(src, getFile) ← pipeline.js  — primary multi-file compile; zwraca { tokens, ast, expLog, parseErrors, mainSource, importEnv }
+    │                              gdy parseErrors.length > 0: expand+typecheck+deferPass pominięte
+    compile(src)            ← pipeline.js  — alias: src => compileMulti(src, () => null)
     │
-    liveCompile(src)       ← pipeline.js  — zawsze pełny pipeline (bez deferPass, bez codegen)
-    │                          używa liveTypecheck() — zbiera WSZYSTKIE typeErrors
+    liveCompile(src, opts)  ← pipeline.js  — zawsze pełny pipeline (bez deferPass, bez codegen)
+    │                          używa liveTypecheck() — zbiera WSZYSTKIE typeErrors; opts.importEnv
+    │
+    liveCompileMulti(src, getFile) ← pipeline.js  — live compile z namespace imports; zwraca { ...liveCompile, importEnv }
     │
     ▼  generate(ast)           ← codegen.js  (orkiestrator)
     ├── buildWAT(ast)          ← wat-encoder.js → S-expr + SSpans
@@ -107,7 +109,7 @@ compiler/
   staticAnalysis.js      — Typy pomocnicze, helpery, Scope
   type-infer.js          — TypeInferBase — wszystkie metody infer*()
   staticTypeChecker.js   — TypeChecker extends TypeInferBase (check*) + typecheck() + liveTypecheck()
-  pipeline.js            — compile(src) + liveCompile(src) (fazy 1–4 + deferPass)
+  pipeline.js            — compile(src) [alias→compileMulti]; compileMulti(src, getFile) — primary; liveCompile(src, opts); liveCompileMulti(src, getFile) → zwraca importEnv
   defer-pass.js          — Faza 3b: AST rewrite — DeferStmt → inline stmts
   ast-to-source.js       — AST → sformatowany kod QLang (fundament formatera)
   wasm-encoder.js        — LEB128, opcody, sekcje WASM

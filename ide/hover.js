@@ -106,6 +106,9 @@ export function buildHoverData(tokens, ast, expansionLog = null, posOf = null) {
 
   (function walk(node) {
     if (!node || typeof node !== 'object') return;
+    // Skip nodes from imported user files — their start/end positions live in
+    // a different coordinate space (the imported file's text, not main.qlang).
+    if (isMainSource && node.__src?.kind === 'user' && node.__src.id !== 'main') return;
     // For main-source hover: template-derived macro nodes must NOT produce entries
     // (their coordinates live in the virtual file, not main), but we still recurse
     // into them to reach call-site block-arg nodes that are nested inside.

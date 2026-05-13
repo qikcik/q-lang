@@ -186,6 +186,11 @@ export class TypeInferBase {
   inferCall(expr) {
     const calleeType = this.inferExpr(expr.callee);
     const calleeName = expr.callee.kind === 'Identifier' ? expr.callee.name : null;
+    // Propagate _mangledName so codegen emits the correct WASM function name
+    // for calls to functions from imported files (which are renamed with a file prefix).
+    if (calleeType._mangledName && expr.callee.kind === 'Identifier') {
+      expr.callee._mangledName = calleeType._mangledName;
+    }
 
     if (!isFunc(calleeType) && calleeType.name !== '__builtin__') {
       throw new TypeError(`'${calleeName ?? 'expression'}' is not a function`, expr.callee);

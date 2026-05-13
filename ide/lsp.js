@@ -33,6 +33,7 @@ import {
   setLastErrorRange, getLastErrorRange,
   setLastErrorRanges, getLastErrorRanges,
   setLastErrorInfo,
+  setLastImportEnv, getLastImportEnv,
 } from './ide-state.js';
 
 // ── Re-exports for backward compatibility ─────────────────────────────────────
@@ -43,6 +44,7 @@ export {
   setLastHoverData, setLastLineIndex, getLastLineIndex,
   setLastErrorRange, setLastErrorRanges, setLastErrorInfo,
   getLastErrorRanges,
+  setLastImportEnv,
 };
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
@@ -161,6 +163,8 @@ function getScopeItems(offset) {
       setItem(decl.name, decl._type, 'struct');
     } else if (decl.kind === 'NamespaceDecl') {
       setItem(decl.name, null, 'namespace');
+    } else if (decl.kind === 'NamespaceImport') {
+      setItem(decl.alias, null, 'namespace');
     } else if (decl.kind === 'MacroDecl') {
       setItem(decl.name, null, 'macro');
     } else if (decl.kind === 'NamespacedDecl') {
@@ -226,6 +230,54 @@ function getNamespaceMembers(nsName) {
       members.push(...getNamespaceMembers(decl.target[0]));
     }
   }
+
+  // ── Imported namespace members ──────────────────────────────────────────────
+  const importEnv = getLastImportEnv();
+  if (importEnv?.size) {
+    // Case A: nsName is a NamespaceImport alias (e.g. 'm' from 'm := namespace "math.qlang"')
+    // Show the top-level names exported by that file.
+    const BUILTIN_NS = new Set(['i8','u8','i16','u16','i32','u32','i64','u64','f32','f64','bool','ext']);
+    for (const decl of ast?.body ?? []) {
+      if (decl.kind === 'NamespaceImport' && decl.alias === nsName) {
+        const entry = importEnv.get(decl.filename);
+        if (!entry) continue;
+        const scope = entry.scope;
+        // Sub-namespaces (e.g. 'Vec2' from Vec2::dot declarations and struct constructors)
+        // Skip built-in scalar namespaces registered by _registerBuiltins — they are present
+        // in every imported scope but are NOT exported symbols of the user's file.
+        for (const nsKey of scope.namespaces?.keys() ?? []) {
+          if (BUILTIN_NS.has(nsKey)) continue;
+          if (!members.find(m => m.label === nsKey)) members.push({ label: nsKey, typeStr: null });
+        }
+        // Plain top-level functions (non-namespaced) registered under original names in scope.symbols
+        for (const [symName, sym] of scope.symbols ?? []) {
+          if (sym.kind === 'func' && sym.type?.name === '__func__') {
+            if (!members.find(m => m.label === symName))
+              members.push({ label: symName, typeStr: typeStr(sym.type) });
+          }
+        }
+      }
+    }
+
+    // Case B: nsName may be a namespace inside an imported scope (e.g. 'Vec2' from math.qlang)
+    // Show methods: of, default, dot, len_sq, ...
+    for (const entry of importEnv.values()) {
+      const subNs = entry.scope.namespaces?.get(nsName);
+      if (!subNs) continue;
+      for (const [mName, sym] of subNs.symbols ?? []) {
+        if (members.find(m => m.label === mName)) continue;
+        let ts = null;
+        if (sym.type?.kind === 'struct-constructor') {
+          const sn = sym.type.structType?.name ?? nsName;
+          ts = mName === 'of' ? `${sn}::of(...)` : `${sn}::default`;
+        } else if (sym.type) {
+          ts = typeStr(sym.type);
+        }
+        members.push({ label: mName, typeStr: ts });
+      }
+    }
+  }
+
   return members;
 }
 

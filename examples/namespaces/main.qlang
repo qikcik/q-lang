@@ -1,0 +1,30 @@
+// main.qlang — Namespace import demo: structs across files
+//
+// Demonstrates:
+//   m := namespace "math.qlang"         — file import alias
+//   m::Vec2::of(x, y)                   — struct constructor (type inferred)
+//   b : m::Vec2 = m::Vec2::of(x, y)     — explicit qualified type annotation
+//   getX := fn(v: m::Vec2) i32 { ... }  — imported type in fn parameter
+//   m::Vec2::dot(a, b)                  — 3-segment qualified method call
+//   m::Vec2::len_sq(v)                  — cross-method call within imported file
+//   m::Vec2::manhattan(a, b)            — distance squared between two vectors
+//
+// After Run:
+//   main() = 47
+//   (getX(a)=3, dot(a,b)=11, len_sq(a)=25, manhattan(a,b)=8)
+
+m := namespace "math.qlang";
+
+// getX demonstrates m::Vec2 as a function parameter type
+getX := fn(v: m::Vec2) i32 {
+    return v.x;
+};
+
+main := fn() i32 {
+    a    := m::Vec2::of(3, 4);           // Vec2 from math.qlang, type inferred
+    b    : m::Vec2 = m::Vec2::of(1, 2); // explicit qualified type annotation
+    d    := m::Vec2::dot(a, b);          // 3*1 + 4*2 = 11
+    lsq  := m::Vec2::len_sq(a);          // dot(a,a) = 9+16 = 25
+    dist := m::Vec2::manhattan(a, b);    // (3-1)^2 + (4-2)^2 = 8
+    return getX(a) + d + lsq + dist;     // 3 + 11 + 25 + 8 = 47
+};

@@ -1,6 +1,6 @@
 ﻿// ide/main.js — Mini-IDE entry point (ES module)
 
-import { compile, liveCompile } from '../compiler/pipeline.js';
+import { compile, liveCompile, liveCompileMulti, compileMulti } from '../compiler/pipeline.js';
 import { generate }  from '../compiler/codegen.js';
 import { renderAST } from '../compiler/ast-renderer.js';
 
@@ -19,6 +19,7 @@ import {
   acState, updateAc, buildLineIndex, buildHoverData,
   setLastAst, setLastTokens, setLastHoverData, setLastLineIndex, getLastLineIndex,
   setLastErrorRange, setLastErrorRanges, setLastErrorInfo, getLastErrorRanges,
+  setLastImportEnv,
 } from './lsp.js';
 import { getEditorText, getCaretOffset, setCaretOffset } from './editor.js';
 
@@ -152,17 +153,24 @@ mainSv.addEventListener('sv-gutter-click', e => {
 // ── Editor input events ───────────────────────────────────────────────────────
 // Live compile — debounced, 150ms. Runs full pipeline except codegen.
 // Updates AST Explorer, hover data, error panel. Does NOT clear WAT/WASM.
+// Compiles the active file: main.qlang (multi-file aware) or any imported file in isolation.
 let _liveTimer = null;
-function triggerLiveCompile(src) {
+function triggerLiveCompile() {
   clearTimeout(_liveTimer);
   _liveTimer = setTimeout(() => {
     clearAllBps();
     mainSv.setBpLines(new Set());
-    const { tokens, ast, expLog, parseErrors, typeErrors } = liveCompile(src);
+    const activePath = vfs.activeProject?.activeFile ?? 'main.qlang';
+    const activeSrc  = vfs.getFile(activePath) ?? '';
+    const result = activePath === 'main.qlang'
+      ? liveCompileMulti(activeSrc, name => vfs.getFile(name) ?? null)
+      : liveCompile(activeSrc);
+    const { tokens, ast, expLog, parseErrors, typeErrors, importEnv } = result;
     if (!ast) return; // lex error — leave existing state
     markStale();       // new AST → WAT/bytecode from previous compile are now stale
     setLastAst(ast);
     setLastTokens(tokens);
+    setLastImportEnv(importEnv);
     setLastLineIndex(buildLineIndex(ast));
     const hd = buildHoverData(tokens, ast, expLog);
     setLastHoverData(hd);
@@ -201,7 +209,7 @@ editor.addEventListener('input', () => {
   const errRanges = getLastErrorRanges();
   applyHighlight(errRanges.length > 0 ? errRanges : null);
   requestAnimationFrame(updateAc);
-  triggerLiveCompile(getCompileSource());
+  triggerLiveCompile();
 });
 
 editor.addEventListener('keydown', e => {
@@ -246,7 +254,8 @@ btnCompile.addEventListener('click', () => {
   clearOutputs();
   try {
     const src             = getCompileSource();
-    const { tokens, ast, expLog, parseErrors } = compile(src);
+    const getFile         = name => vfs.getFile(name) ?? null;
+    const { tokens, ast, expLog, parseErrors } = compileMulti(src, getFile);
     setLastTokens(tokens);
     setLastAst(ast);
     setLastLineIndex(buildLineIndex(ast));

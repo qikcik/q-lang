@@ -84,12 +84,25 @@ function _loadEntry(entry, onLoad) {
   const mainFile = entry.main ?? entry.file;
   const allFiles = entry.files ?? [entry.file];
 
+  // Strip the folder prefix shared with main so VFS keys are simple basenames.
+  // E.g. mainFile='namespaces/main.qlang' → mainDir='namespaces/'
+  //      'namespaces/vec2.qlang' → stored as 'vec2.qlang' in VFS.
+  const mainDir = mainFile.includes('/')
+    ? mainFile.slice(0, mainFile.lastIndexOf('/') + 1)
+    : '';
+
   // Fetch all files in parallel; remap the main file to 'main.qlang'
   Promise.all(
     allFiles.map(f =>
       fetch(new URL('../examples/' + f, import.meta.url))
         .then(r => r.text())
-        .then(t => [f === mainFile ? 'main.qlang' : f, t.replace(/\r\n/g, '\n')])
+        .then(t => {
+          let key = f === mainFile ? 'main.qlang' : f;
+          if (mainDir && key !== 'main.qlang' && key.startsWith(mainDir)) {
+            key = key.slice(mainDir.length);
+          }
+          return [key, t.replace(/\r\n/g, '\n')];
+        })
     )
   ).then(pairs => {
     onLoad({ name: entry.name, texts: new Map(pairs) });

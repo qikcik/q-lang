@@ -81,20 +81,32 @@ export class TypeChecker extends TypeInferBase {
 
   // ── program ────────────────────────────────────────────────────────────────
 
-  check(ast) {
-    // Pass 0: register namespace declarations (empty + alias)
+  check(ast, importEnv = null) {
+    // Pass 0: register namespace declarations (empty + alias) and file imports
     for (const decl of ast.body) {
-      if (decl.kind !== 'NamespaceDecl') continue;
-      if (decl.name === 'ext') {
-        throw new TypeError(`'ext' is a reserved namespace and cannot be declared by user code`, decl);
+      if (decl.kind === 'NamespaceDecl') {
+        if (decl.name === 'ext') {
+          throw new TypeError(`'ext' is a reserved namespace and cannot be declared by user code`, decl);
+        }
+        if (decl.target) {
+          // Alias: gfx := namespace Engine::Graphics;
+          this.scope.define(decl.name, null, 'namespace-alias', false, decl.line);
+          this.scope.symbols.get(decl.name).target = decl.target;
+        } else {
+          // Empty: std := namespace;
+          this.scope.defineNamespace(decl.name);
+        }
       }
-      if (decl.target) {
-        // Alias: gfx := namespace Engine::Graphics;
-        this.scope.define(decl.name, null, 'namespace-alias', false, decl.line);
-        this.scope.symbols.get(decl.name).target = decl.target;
-      } else {
-        // Empty: std := namespace;
-        this.scope.defineNamespace(decl.name);
+      if (decl.kind === 'NamespaceImport') {
+        // import := namespace "file.qlang"; — mount file scope + register alias
+        const nsKey = _filenameToNsKey(decl.filename);
+        const entry = importEnv?.get(decl.filename);
+        if (!entry) {
+          throw new TypeError(`File not found for import: '${decl.filename}'`, decl);
+        }
+        this.globalScope.mountNamespace(nsKey, entry.scope);
+        this.scope.define(decl.alias, null, 'namespace-alias', false, decl.line);
+        this.scope.symbols.get(decl.alias).target = [nsKey];
       }
     }
 
@@ -102,6 +114,12 @@ export class TypeChecker extends TypeInferBase {
     for (const decl of ast.body) {
       if (decl.kind === 'ErrorNode') continue;
       if (decl.kind === 'FuncDecl') {
+        // When typechecking an imported file in isolation (_filePrefix is set),
+        // rename the FuncDecl.name with the prefix to ensure unique WASM names.
+        // Register under the ORIGINAL name in scope so intra-file calls still resolve.
+        const originalName = decl.name;
+        const mangledName  = this._filePrefix ? this._filePrefix + '__' + originalName : null;
+        if (mangledName) decl.name = mangledName; // rename for WASM emit
         // Resolve scalar UserTypeRefs in param types (struct refs resolved in Pass 2)
         const paramTypes = decl.params.map(p => {
           try { return this.resolveType(p.typeAnnot, p); } catch { return p.typeAnnot; }
@@ -109,7 +127,8 @@ export class TypeChecker extends TypeInferBase {
         let returnType;
         try { returnType = this.resolveType(decl.returnType, decl); } catch { returnType = decl.returnType; }
         const funcType = { name: '__func__', mut: false, returnType, paramTypes };
-        this.scope.define(decl.name, funcType, 'func', false, decl.line);
+        if (mangledName) funcType._mangledName = mangledName;
+        this.scope.define(originalName, funcType, 'func', false, decl.line);
         decl._type = funcType;
       }
       // Namespaced function: A::B := fn(...) — mangle name + register in namespace scope
@@ -155,8 +174,9 @@ export class TypeChecker extends TypeInferBase {
     if (decl.kind === 'FuncDecl')     return this.checkFuncDecl(decl);
     if (decl.kind === 'MacroDecl')    return; // consumed by expander before typecheck
     if (decl.kind === 'StructDecl')   return this.checkStructDecl(decl);
-    if (decl.kind === 'NamespaceDecl') return; // processed in Pass 0
-    if (decl.kind === 'NamespacedDecl') return this.checkNamespacedDecl(decl);
+    if (decl.kind === 'NamespaceDecl')   return; // processed in Pass 0
+    if (decl.kind === 'NamespaceImport')  return; // processed in Pass 0 via importEnv
+    if (decl.kind === 'NamespacedDecl')   return this.checkNamespacedDecl(decl);
     throw new TypeError(`Unknown declaration kind '${decl.kind}'`, decl.line);
   }
 
@@ -223,6 +243,7 @@ export class TypeChecker extends TypeInferBase {
 
   // Resolve a parser type annotation to a fully-resolved internal type.
   // Recursively resolves UserTypeRef inside PtrType, ArrayType, FuncType.
+  // Also handles QualifiedTypeRef: m::Vec2 where m is a NamespaceImport alias.
   resolveType(typeAnnot, errorNode) {
     if (!typeAnnot) return null;
     if (typeAnnot.kind === 'UserTypeRef') {
@@ -236,6 +257,17 @@ export class TypeChecker extends TypeInferBase {
       }
       throw new TypeError(
         `'${typeAnnot.name}' is not a type`,
+        errorNode,
+      );
+    }
+    if (typeAnnot.kind === 'QualifiedTypeRef') {
+      // e.g. m::Vec2 — resolve through namespace chain (namespace-alias expansion in Scope)
+      const sym = this.scope.resolveQualified(typeAnnot.segments, errorNode);
+      if (sym?.type?.kind === 'StructType') {
+        return { ...sym.type, mut: typeAnnot.mut ?? false };
+      }
+      throw new TypeError(
+        `'${typeAnnot.segments.join('::')}' is not a type`,
         errorNode,
       );
     }
@@ -588,9 +620,15 @@ export class TypeChecker extends TypeInferBase {
   }
 }
 
-export function typecheck(ast) {
+// Map a filename to a unique internal namespace key used when mounting imported file scopes.
+// E.g. 'utils.qlang' → '__f_utils_qlang'
+export function _filenameToNsKey(filename) {
+  return '__f_' + filename.toLowerCase().replace(/[^a-z0-9]/g, '_');
+}
+
+export function typecheck(ast, importEnv = null) {
   const tc = new TypeChecker();
-  tc.check(ast);
+  tc.check(ast, importEnv);
   return ast;
 }
 
@@ -599,27 +637,43 @@ export function typecheck(ast) {
 // tc.errors enables resilient per-statement recovery inside checkBlock.
 // Outer per-declaration try-catch catches errors before checkBlock runs (e.g. param types).
 // Stores results in ast.typeErrors.
-export function liveTypecheck(ast) {
+export function liveTypecheck(ast, importEnv = null) {
   ast.typeErrors = [];
   const tc = new TypeChecker();
   tc.errors = ast.typeErrors; // enable resilient per-stmt mode in checkBlock
 
-  // Pass 0: register namespace declarations (empty + alias) — resilient
+  // Pass 0: register namespace declarations (empty + alias) and file imports — resilient
   for (const decl of ast.body) {
-    if (decl.kind !== 'NamespaceDecl') continue;
-    try {
-      if (decl.name === 'ext') {
-        ast.typeErrors.push(new TypeError(`'ext' is a reserved namespace and cannot be declared by user code`, decl));
-        continue;
+    if (decl.kind === 'NamespaceDecl') {
+      try {
+        if (decl.name === 'ext') {
+          ast.typeErrors.push(new TypeError(`'ext' is a reserved namespace and cannot be declared by user code`, decl));
+          continue;
+        }
+        if (decl.target) {
+          tc.scope.define(decl.name, null, 'namespace-alias', false, decl.line);
+          tc.scope.symbols.get(decl.name).target = decl.target;
+        } else {
+          tc.scope.defineNamespace(decl.name);
+        }
+      } catch (e) {
+        ast.typeErrors.push(e);
       }
-      if (decl.target) {
-        tc.scope.define(decl.name, null, 'namespace-alias', false, decl.line);
-        tc.scope.symbols.get(decl.name).target = decl.target;
-      } else {
-        tc.scope.defineNamespace(decl.name);
+    }
+    if (decl.kind === 'NamespaceImport') {
+      try {
+        const nsKey = _filenameToNsKey(decl.filename);
+        const entry = importEnv?.get(decl.filename);
+        if (!entry) {
+          ast.typeErrors.push(new TypeError(`File not found for import: '${decl.filename}'`, decl));
+          continue;
+        }
+        tc.globalScope.mountNamespace(nsKey, entry.scope);
+        tc.scope.define(decl.alias, null, 'namespace-alias', false, decl.line);
+        tc.scope.symbols.get(decl.alias).target = [nsKey];
+      } catch (e) {
+        ast.typeErrors.push(e);
       }
-    } catch (e) {
-      ast.typeErrors.push(e);
     }
   }
 
@@ -628,13 +682,17 @@ export function liveTypecheck(ast) {
     if (decl.kind === 'ErrorNode') continue;
     if (decl.kind === 'FuncDecl') {
       try {
+        const originalName = decl.name;
+        const mangledName  = tc._filePrefix ? tc._filePrefix + '__' + originalName : null;
+        if (mangledName) decl.name = mangledName;
         const paramTypes = decl.params.map(p => {
           try { return tc.resolveType(p.typeAnnot, p); } catch { return p.typeAnnot; }
         });
         let returnType;
         try { returnType = tc.resolveType(decl.returnType, decl); } catch { returnType = decl.returnType; }
         const funcType = { name: '__func__', mut: false, returnType, paramTypes };
-        tc.scope.define(decl.name, funcType, 'func', false, decl.line);
+        if (mangledName) funcType._mangledName = mangledName;
+        tc.scope.define(originalName, funcType, 'func', false, decl.line);
         decl._type = funcType;
       } catch (e) {
         ast.typeErrors.push(e);

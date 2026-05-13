@@ -962,3 +962,48 @@ Klasa `Scope` (staticAnalysis.js) posiada `namespaces: Map<string, Scope>`:
 - Namespace'd variables (`std::BAR := 42;`) — parser obsługuje, ale typechecker nie rejestruje
   w namespace scope, codegen nie emituje `global.get`/`global.set`. Deferred do v2.
 - `void` pozostaje keyword (nie namespace-owalny)
+
+---
+
+### 13.11 Import z plików
+
+Składnia:
+
+```
+m := namespace "math.qlang";
+```
+
+Alias (`m`) jest widoczny w bieżącym pliku jako namespace zawierający wszystkie deklaracje z importowanego pliku.
+
+**Dostęp do importowanych struktur i funkcji:**
+
+```
+m := namespace "math.qlang";   // math.qlang definiuje: Vec2 := struct; Vec2::dot := fn();
+
+a := m::Vec2::of(3, 4);        // konstruktor struktury z importowanego pliku
+b := m::Vec2::of(1, 2);
+d := m::Vec2::dot(a, b);       // funkcja z importowanego pliku (3-segmentowa nazwa)
+```
+
+**Qualified type annotations:**
+
+Importowany typ może być użyty w **pozycji typowej** (jawna adnotacja) — zarówno w zmiennych, parametrach funkcji, jak i polach struktur:
+
+```
+// zmienna z jawnym typem
+v : m::Vec2 = m::Vec2::of(3, 4);
+
+// mutable binding
+w : mut m::Vec2 = m::Vec2::of(0, 0);
+
+// parametr funkcji
+getX := fn(v: m::Vec2) i32 { return v.x; };
+
+// pole struktury (w pliku importującym)
+Entity := struct { id: i32; pos: m::Vec2; };
+```
+
+**Ograniczenia importu z plików (v1):**
+- Import tylko z jednego poziomu — brak transitive re-exportów
+- Deklaracja importu tylko na top-level (nie wewnątrz funkcji)
+- Cykliczne importy wykrywane i zgłaszane jako błąd

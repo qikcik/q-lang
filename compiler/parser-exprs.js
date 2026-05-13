@@ -88,8 +88,21 @@ export class ParserExprs extends ParserBase {
 
     // Type reference: IDENT in type position — covers both scalar types (i32, f64, bool…)
     // and user-defined types (struct names). All resolved by the type-checker.
+    // Also handles qualified type refs: m::Vec2 → QualifiedTypeRef { segments: ['m','Vec2'] }
     if (this.check(TT.IDENT)) {
       const ident = this.eat(TT.IDENT);
+      // Optional '::' chain: m::Vec2 or m::ns::T
+      if (this.check(TT.OP, '::')) {
+        const segments = [ident.value];
+        let end = ident.end;
+        while (this.check(TT.OP, '::')) {
+          this.pos++;
+          const seg = this.eat(TT.IDENT);
+          segments.push(seg.value);
+          end = seg.end;
+        }
+        return node('QualifiedTypeRef', { segments, mut, line: ident.line, start: mutStart ?? ident.start, end });
+      }
       return node('UserTypeRef', { name: ident.value, mut, line: ident.line, start: mutStart ?? ident.start, end: ident.end });
     }
 

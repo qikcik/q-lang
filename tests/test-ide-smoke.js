@@ -17,7 +17,7 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { test, suite, assert, assertEq } from './helpers.js';
-import { compile, liveCompile } from '../compiler/pipeline.js';
+import { compile, liveCompile, compileMulti } from '../compiler/pipeline.js';
 import { generate } from '../compiler/codegen.js';
 import { parseCanonicalRef, buildCanonicalRef } from '../compiler/source-ref.js';
 
@@ -398,9 +398,17 @@ test('every entry has name and file reference', () => {
 });
 
 test('every listed file exists in examples/', () => {
-  for (const { file } of examplesIndex) {
-    const abs = new URL('../examples/' + file, import.meta.url);
-    assert(existsSync(abs), `examples/${file} missing`);
+  for (const entry of examplesIndex) {
+    // Check primary file reference
+    const abs = new URL('../examples/' + entry.file, import.meta.url);
+    assert(existsSync(abs), `examples/${entry.file} missing`);
+    // For multi-file entries, check all listed files
+    if (Array.isArray(entry.files)) {
+      for (const f of entry.files) {
+        const fa = new URL('../examples/' + f, import.meta.url);
+        assert(existsSync(fa), `examples/${f} missing (in ${entry.name}.files)`);
+      }
+    }
   }
 });
 
@@ -422,12 +430,26 @@ test('every example compiles without parse errors', () => {
   }
 });
 
-for (const { name, file } of examplesIndex) {
+for (const entry of examplesIndex) {
+  const { name, file } = entry;
   test(`${name} (${file}) compiles and generates valid WASM`, () => {
-    const abs = new URL('../examples/' + file, import.meta.url);
-    const src = readFileSync(abs, 'utf-8');
+    const mainAbs = new URL('../examples/' + file, import.meta.url);
+    const src = readFileSync(mainAbs, 'utf-8');
     let ast = null;
-    try { ({ ast } = compile(src)); } catch (e) {
+    try {
+      if (Array.isArray(entry.files) && entry.files.length > 1) {
+        // Multi-file example: use compileMulti with a getFile that reads from examples/
+        const mainDir = file.includes('/') ? file.slice(0, file.lastIndexOf('/') + 1) : '';
+        const getFile = name => {
+          // name is a plain basename (e.g. 'vec2.qlang') — look in same folder as main
+          const absPath = new URL('../examples/' + mainDir + name, import.meta.url);
+          return existsSync(absPath) ? readFileSync(absPath, 'utf-8') : null;
+        };
+        ({ ast } = compileMulti(src, getFile));
+      } else {
+        ({ ast } = compile(src));
+      }
+    } catch (e) {
       assert(false, `${file} compile threw: ` + e.message); return;
     }
     assert(ast?.kind === 'Program', 'ast is Program');

@@ -16,8 +16,9 @@
 //   ScopeBlock, ExprStmt, AssignStmt, MacroCallStmt
 //   StructDecl { name, fields: StructField[], line, start, end }
 //   StructField{ name, typeAnnot, defaultValue, mut, line, start, end }
-//   NamespaceDecl  { name, target: string[]|null, line, start, end }
-//   NamespacedDecl { segments: string[], inner: FuncDecl|VarDecl, line, start, end }
+//   NamespaceDecl   { name, target: string[]|null, line, start, end }
+//   NamespaceImport  { alias: string, filename: string, line, start, end }
+//   NamespacedDecl   { segments: string[], inner: FuncDecl|VarDecl, line, start, end }
 //
 // All expression/type AST nodes are in parser-exprs.js.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -254,6 +255,15 @@ export class Parser extends ParserExprs {
 
   parseNamespaceDeclBody(nameTok) {
     this.eat(TT.KEYWORD, 'namespace');
+    // name := namespace "filename";  →  NamespaceImport
+    if (this.check(TT.STRING_LIT)) {
+      const fileTok = this.eat(TT.STRING_LIT);
+      const semi    = this.eat(TT.OP, ';');
+      return node('NamespaceImport', {
+        alias: nameTok.value, filename: fileTok.value,
+        line: nameTok.line, start: nameTok.start, end: semi.end,
+      });
+    }
     let target = null;
     if (this.check(TT.IDENT)) {
       target = [this.eat(TT.IDENT).value];

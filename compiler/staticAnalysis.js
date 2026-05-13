@@ -287,6 +287,12 @@ export class Scope {
     return null;
   }
 
+  // Mount an externally-created scope (e.g. an imported file's globalScope) as a namespace.
+  mountNamespace(name, scope) {
+    if (!this.namespaces) this.namespaces = new Map();
+    this.namespaces.set(name, scope);
+  }
+
   resolveQualified(segments, errorNode) {
     if (segments.length === 1) return this.resolve(segments[0], errorNode);
 

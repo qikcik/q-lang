@@ -1,6 +1,6 @@
 # QLang — Namespace Plan
 
-> Status: **ZAIMPLEMENTOWANE** — archiwum decyzji projektowych. Zob. [langDetail.md](langDetail.md) §namespace i §10 ograniczenia. Namespace'd variables (`std::BAR := 42;`) — parser obsługuje, codegen/typechecker deferred do v2.
+> Status: **ZAIMPLEMENTOWANE** — archiwum decyzji projektowych. Zob. [langDetail.md](langDetail.md) §13 i §10 ograniczenia. Namespace'd variables (`std::BAR := 42;`) — parser obsługuje, codegen/typechecker deferred do v2. **Namespace file imports** (`x := namespace "file.qlang"`) — zaimplementowane: `NamespaceImport` AST node, `compileMulti`, `liveCompileMulti`, per-file typecheck z `_filePrefix`, autocomplete przez `importEnv`.
 
 ---
 
@@ -458,6 +458,53 @@ Namespace'd globals (np. `Player::count`):
 
 ---
 
+## 12. Qualified type annotations (`QualifiedTypeRef`)
+
+Importowany typ może być użyty **jako jawna adnotacja typowa** w deklaracjach zmiennych, parametrach funkcji i polach struktur.
+
+**Zmienna lokalna:**
+```
+m := namespace "math.qlang";
+v : m::Vec2 = m::Vec2::of(3, 4);       // explicit — zamiast type inference
+w : mut m::Vec2 = m::Vec2::of(0, 0);   // mutable binding
+```
+
+**Parametr funkcji:**
+```
+getX := fn(v: m::Vec2) i32 {
+    return v.x;
+};
+```
+
+**Pole struktury (w pliku importującym):**
+```
+Entity := struct { id: i32; pos: m::Vec2; };
+```
+
+**AST node:**
+```js
+node('QualifiedTypeRef', {
+    segments: string[],   // np. ['m', 'Vec2'] lub ['a', 'b', 'T']
+    mut:      bool,       // true jeśli poprzedza 'mut'
+    line, start, end
+})
+```
+
+`parseType()` (parser-exprs.js) po zjedzeniu `IDENT` sprawdza `::` — jeśli obecne, zbiera kolejne segmenty i emituje `QualifiedTypeRef` zamiast `UserTypeRef`.
+
+`resolveType()` (staticTypeChecker.js) obsługuje `QualifiedTypeRef` przez `scope.resolveQualified(segments)` — ten sam mechanizm alias expansion co dla `QualifiedName` w wyrażeniach. Jeśli segmenty wskazują na `StructType`, zwraca go (z propagacją `mut`); inaczej rzuca `TypeError`.
+
+---
+
+## 13. Circular imports — zachowanie
+
+| Funkcja | Zachowanie przy cyklicznych importach |
+|---------|---------------------------------------|
+| `compileMulti` | Rzuca `Error("Circular import: '...'")`; wykrywane przez `visiting: Set` w rekurencyjnym resolverze |
+| `liveCompileMulti` | Cicho pomija cykliczny plik (`if (visiting.has(filename)) return;` w `buildLiveImportEnv`) — plik po prostu nie trafia do `importEnv`; brakujący namespace → standard type error, bez throw |
+
+---
+
 ## 11. Status implementacji
 
 > Zaktualizowano: 2025-06
@@ -476,4 +523,9 @@ Namespace'd globals (np. `Player::count`):
 | Codegen: mangled names (`A::B` → `$A__B`) | ✅ Done | wat-encoder.js |
 | liveTypecheck (IDE) — namespace support | ✅ Done | Pass 0 + NamespacedDecl + resolveType synced |
 | DEFAULT_SNIPPET + test-snippet.js | ✅ Done | Namespace examples w snippecie |
-| Tests: test-namespace.js | ✅ Done | Parser, typechecker, codegen, liveCompile |
+| `NamespaceImport` (`x := namespace "file.qlang"`) | ✅ Done | Parser, TypeChecker Pass 0 (`mountNamespace` z importEnv), `compileMulti` rozwiązuje importy |
+| `compileMulti(src, getFile)` + `liveCompileMulti` | ✅ Done | Multi-file pipeline; `compile` = alias; `liveCompileMulti` zwraca `importEnv` |
+| Autocomplete dla importowanych namespace'ów | ✅ Done | `getScopeItems` (NamespaceImport), `getNamespaceMembers` Case A+B, `importEnv` w ide-state; wyklucza built-in skalary z podpowiedzi |
+| Qualified type annotations (`QualifiedTypeRef`) | ✅ Done | `parseType()` emituje `QualifiedTypeRef`; `resolveType()` obsługuje przez `scope.resolveQualified()`; działa w zmiennych, parametrach fn i polach struct |
+| Circular imports — zachowanie | ✅ Done | `compileMulti`: rzuca `Error("Circular import")`. `liveCompileMulti`: cicho pomija cykl; brakujący plik → type error zamiast throw |
+| Tests: test-namespace.js | ✅ Done | Parser, typechecker, codegen, liveCompile, QualifiedTypeRef, circular imports |

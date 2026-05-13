@@ -482,7 +482,7 @@ function emitCall(b, expr, ctx) {
     }
   }
   for (const arg of expr.args) emitExpr(b, arg, ctx);
-  b.push(['call', `$${expr.callee.name}`]);
+  b.push(['call', `$${expr.callee._mangledName ?? expr.callee.name}`]);
   close();
 }
 

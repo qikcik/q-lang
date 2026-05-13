@@ -1,6 +1,6 @@
 # QLang IDE — Dokumentacja edytora i interfejsu
 
-> Stan na: 2026-05-13 (aktualizacja: multi-file project support — VFS, file-tree, tab bar; "Open project" dropdown z user projects + examples; pane Files → Project z rename/delete; example projects session-only, nie persystowane)
+> Stan na: 2026-05-13 (aktualizacja: multi-file project support — VFS, file-tree, tab bar; "Open project" dropdown z user projects + examples; pane Files → Project z rename/delete; example projects session-only, nie persystowane; **namespace file imports** — autocomplete importowanych namespace’ów przez `importEnv` w `ide-state`)
 > Wydzielone z archDetail.md i langDetail.md.
 
 ---
@@ -16,7 +16,7 @@
 - `views.js` — renderery widoków: `syntaxHighlight`, `renderWAT`, `renderBytecode`, `classifyWasmBytes`, `findWatSpan`, `findByteSpan`
 - `ide/source-view.js` — `<qlang-source-view>` Web Component (Light DOM, zero Shadow DOM); dwa tryby: `editable` i read-only; API: `setText`, `setContent`, `getText`, `scrollToOffset`, `set hoverData`, `setBpLines`, `highlightNode`, `highlightRange`, `addHighlightRange`, `setHighlights`, `clearHighlight`; CSS klasy rektów: `sv-hl-rect` (niebieski), `sv-hl-dimmed` (żółty), `sv-hl-active` (pomarańczowo-czerwony kontur); Events: `sv-gutter-click { line }`, `sv-node-click { node }`; `_storedHighlights` + scroll listener + `ResizeObserver` (redraw przy scrollu/resize); **diagnostyczne `console.warn`** przy 4 silent exit points w `_appendRect`
 - `ide/highlight.js` — **Koordynator podświetleń** (jeden moduł zna DOM wszystkich widoków); eksportuje `initHighlight`, `highlightAndScrollSource`, `addSourceHighlight`, `clearAllSourceHighlights`, `applyChainHighlights`, `highlightAst`, `highlightAstWithStmt`, `highlightWat`, `highlightBytecode`, `clearAll`, `setOnMissingView`; `highlightAndScrollSource` wywołuje `_onMissingView(sourceId)` gdy `getView()` zwraca null — macro-panel.js rejestruje callback auto-otwierający panel; wszystkie inne moduły IDE delegują do niego zamiast bezpośrednio manipulować DOM; **diagnostyczne `console.warn`** przy każdym null-guard (`_outAst`/`_watRoot`/`_outBytecode` nie zainicjalizowane)
-- `ide/ide-state.js` — pasywny store dla `expLog`; `setExpLog`/`getExpLog`; zero zależności (żadnych importów z innych plików IDE), eliminuje 3 rozproszone kopie `lastExpLog`
+- `ide/ide-state.js` — pasywny store dla `expLog`; `setExpLog`/`getExpLog`; `setLastImportEnv`/`getLastImportEnv` — przechowuje ostatni `importEnv` po `liveCompileMulti` (używane przez `lsp.js` do autocomplete); zero zależności (brak importów z innych plików IDE)
 - `ide/layout.js` — wydzielony z inline `<script>` w `index.html`; obsługuje resize handlerów (col-handle, row-handle), drag & drop paneli, zwijanie/rozwijanie `.sub-pane`
 - `ide/qlang-pane.js` — `<qlang-pane>` Web Component (Light DOM); wrapper strukturalny dla paneli IDE; adopts pre-existing children
 - `ide/qlang-toolbar.js` — `<qlang-toolbar>` Web Component (Light DOM, 33 linii); wrapper na przyciski nagłówka; interceptuje click na `button[data-action]` → dispatches semantic events: `ql-compile`, `ql-run`, `ql-debug`, `ql-clear` (bubbling); HTML: `<qlang-toolbar><button data-action="compile">Compile</button>...</qlang-toolbar>`
@@ -29,7 +29,7 @@
 - `ide/nav-bar.js` — pływający pasek `#nav-bar` (pill) z przyciskami ◁ ▷ × do nawigacji po segmentach łańcucha
 - `compiler/source-ref.js` — `buildCanonicalRef(node, s?, e?) → string`, `parseCanonicalRef(str) → Segment[]`, `segmentLabel(sourceId) → string`
 - `compiler/source-buffer.js` — `SourceBuffer { id, text, tokens, kind, callSite }` z fabrykami `forMain()`, `forMacro()`; gettery `root`, `parent`, `depth`
-- `lsp.js` — narzędzia edytora: `updateAc`, `syncAstHighlight`, `buildLineIndex`, `getLastLineIndex`, `getScopeItems`, `getNamespaceMembers`, `resolveChainedType`; obsługuje autocomplete (3 tryby: general, dot, ::), type-aware member suggestions
+- `lsp.js` — narzędzia edytora: `updateAc`, `syncAstHighlight`, `buildLineIndex`, `getLastLineIndex`, `getScopeItems` (obsługuje `NamespaceImport` — alias jako `'namespace'`), `getNamespaceMembers` (Case A: alias importu → sub-namespace’y + plain funcs z importEnv; Case B: sub-namespace z importEnv), `resolveChainedType`; re-eksportuje `setLastImportEnv`
 - `ide/hover.js` — hover data builder: `HINTS` (statyczne definicje), `buildHoverData` (AST walker → `HoverEntry[]`); obsługuje Identifier, VarDecl, FuncDecl, Param, StructDecl, StructField, MemberExpr, UnaryExpr, NamespaceDecl, NamespacedDecl, QualifiedName, MacroCallStmt
 - **Nagłówek**: przyciski Compile | ▶ Run | ⬤ Debug | ⏹ Stop | Clear w `<qlang-toolbar>`; **+ New project** (tworzy nowy projekt przez `prompt`); **Open project ▾** (dropdown z sekcją "My projects" + "Examples")
 - **Trzy kolumny**: Edytor | AST + Bytecode + Debugger (stacked) | WAT Explorer + Konsola + Błędy (stacked)
@@ -159,8 +159,8 @@ Po wpisaniu `Nazwa::` autocomplete pobiera członków namespace'u przez `getName
 - `NamespacedDecl` (funkcje, zmienne deklarowane w namespace)
 - Konstruktory struct: `T::of(...)`, `T::default()`
 - Konstruktory skalarne: `i32::of(...)` itp.
-- Aliasy: jeśli namespace jest aliasem, rozwiązuje do celu
-
+- Aliasy: jeśli namespace jest aliasem, rozwiązuje do celu- **Case A — alias importu** (`m := namespace "math.qlang"`): szuka `NamespaceImport` w AST, odpytuje `getLastImportEnv()` — pokazuje sub-namespace’y (np. `Vec2`) + plain functions z importowanego pliku
+- **Case B — sub-namespace z importu** (np. `Vec2`): szuka w wartościach `importEnv` — pokazuje symbole sub-namespace’u (np. `of`, `default`, `dot`, `len_sq`)
 #### 2. Dot-completion (po `.`)
 Po wpisaniu `.` autocomplete sprawdza typ wyrażenia przed kropką przez `resolveChainedType(src, dotPos, scopeItems)`:
 - `struct` → sugeruje pola struktury (z typami)
