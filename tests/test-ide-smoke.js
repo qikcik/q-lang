@@ -53,7 +53,9 @@ const REQUIRED_IDS = [
   // lang-docs.js
   'lang-docs',
   // examples.js
-  'btn-load-example', 'example-list',
+  'btn-open-project', 'project-list',
+  // project-ui.js / vfs integration
+  'file-tree', 'tab-bar', 'files-pane', 'btn-new-project',
 ];
 
 for (const id of REQUIRED_IDS) {
@@ -120,6 +122,7 @@ const IDE_FILES = [
   'ide/qlang-pane.js', 'ide/layout.js',
   'ide/qlang-error-panel.js', 'ide/qlang-console.js', 'ide/qlang-toolbar.js',
   'ide/examples.js',
+  'ide/vfs.js', 'ide/file-tree.js', 'ide/project-ui.js',
   'examples/index.json', 'examples/showcase.qlang', 'examples/fibonacci.qlang',
 ];
 
@@ -322,6 +325,10 @@ const CRITICAL_CSS_CLASSES = [
   'err-line',
   'ac-item', 'ac-sel',
   'dbg-current-line', 'dbg-toolbar',
+  // VFS / file-tree
+  'ft-header', 'ft-list', 'ft-item', 'ft-active', 'ft-badge', 'ft-btn-del',
+  // tab bar
+  'tab-bar', 'tab-item', 'tab-active',
 ];
 
 for (const cls of CRITICAL_CSS_CLASSES) {
@@ -371,12 +378,22 @@ test('index.json is a non-empty array', () => {
     'index.json must be non-empty array');
 });
 
-test('every entry has string name and string file', () => {
+test('every entry has name and file reference', () => {
   for (const entry of examplesIndex) {
     assert(typeof entry.name === 'string' && entry.name.length > 0,
       `entry.name must be non-empty string (got ${JSON.stringify(entry.name)})`);
-    assert(typeof entry.file === 'string' && entry.file.endsWith('.qlang'),
+    assert(
+      typeof entry.file === 'string' && entry.file.endsWith('.qlang'),
       `entry.file must be a .qlang filename (got ${JSON.stringify(entry.file)})`);
+    // New format fields (both must be present together)
+    if (entry.files !== undefined || entry.main !== undefined) {
+      assert(Array.isArray(entry.files) && entry.files.length > 0,
+        `entry.files must be non-empty array: ${entry.name}`);
+      assert(typeof entry.main === 'string' && entry.main.endsWith('.qlang'),
+        `entry.main must be a .qlang filename: ${entry.name}`);
+      assert(entry.files.includes(entry.main),
+        `entry.main must be in entry.files: ${entry.name}`);
+    }
   }
 });
 
@@ -421,8 +438,8 @@ for (const { name, file } of examplesIndex) {
 }
 
 test('index.html example-picker button is positioned left of toolbar', () => {
-  // btn-load-example must appear before btn-compile in source order
-  const pickerPos  = html.indexOf('btn-load-example');
+  // btn-open-project must appear before btn-compile in source order
+  const pickerPos  = html.indexOf('btn-open-project');
   const compilePos = html.indexOf('btn-compile');
   assert(pickerPos > 0 && compilePos > 0, 'both elements present');
   assert(pickerPos < compilePos, 'example picker appears before toolbar in HTML');

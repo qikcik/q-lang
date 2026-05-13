@@ -69,11 +69,11 @@
     button#btn-clear { background: transparent; color: var(--muted); }
     button#btn-clear:hover { background: var(--border); color: var(--text); }
 
-    /* ── Example picker ─────────────────────────────────────────────────── */
-    .example-picker {
+    /* ── Open project picker ──────────────────────────────────────────────── */
+    .open-project-picker {
       position: relative;
     }
-    #example-list {
+    #project-list {
       position: absolute;
       top: 100%;
       left: 0;
@@ -86,14 +86,39 @@
       min-width: 160px;
       z-index: 100;
     }
-    #example-list li {
+    #project-list li {
       padding: 6px 14px;
       cursor: pointer;
       font-size: 13px;
       white-space: nowrap;
     }
-    #example-list li:hover {
+    #project-list li:hover:not(.project-list-header):not(.project-list-sep) {
       background: var(--accent);
+      color: var(--bg);
+    }
+    #project-list .project-list-header {
+      padding: 6px 14px 3px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      cursor: default;
+      pointer-events: none;
+    }
+    #project-list .project-list-sep {
+      height: 1px;
+      background: var(--border);
+      margin: 4px 0;
+      padding: 0;
+      cursor: default;
+      pointer-events: none;
+    }
+    #project-list .project-list-example {
+      color: var(--muted);
+      font-style: italic;
+    }
+    #project-list .project-list-example:hover {
       color: var(--bg);
     }
 
@@ -801,9 +826,9 @@
 
 <header>
   <h1>QLang IDE</h1>
-  <div class="example-picker">
-    <button id="btn-load-example">Load example ▾</button>
-    <ul id="example-list" hidden></ul>
+  <div class="open-project-picker">
+    <button id="btn-open-project">Open project ▾</button>
+    <ul id="project-list" hidden></ul>
   </div>  <button id="btn-ide-tests" onclick="window.open('../tests/smoke.html','_blank')">IDE tests</button>  <qlang-toolbar style="margin-left:auto">
     <button id="btn-compile" data-action="compile">Compile</button>
     <button id="btn-run" data-action="run">▶ Run</button>

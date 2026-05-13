@@ -1,11 +1,11 @@
 [
-  { "name": "Fibonacci",            "file": "fibonacci.qlang" },
-  { "name": "Function Pointers",    "file": "function-pointers.qlang" },
-  { "name": "Floats (f64)",         "file": "floats.qlang" },
-  { "name": "Defer",                "file": "defer.qlang" },
-  { "name": "Macros (Advanced)",    "file": "macros-advanced.qlang" },
-  { "name": "Structs + Pointers",   "file": "structs-ptr.qlang" },
-  { "name": "Showcase",             "file": "showcase.qlang" },
-  { "name": "Hangman",              "file": "hangman.qlang" },
-  { "name": "Sokoban",              "file": "sokoban.qlang" }
+  { "name": "Fibonacci",            "file": "fibonacci.qlang",          "main": "fibonacci.qlang",          "files": ["fibonacci.qlang"] },
+  { "name": "Function Pointers",    "file": "function-pointers.qlang",  "main": "function-pointers.qlang",  "files": ["function-pointers.qlang"] },
+  { "name": "Floats (f64)",         "file": "floats.qlang",             "main": "floats.qlang",             "files": ["floats.qlang"] },
+  { "name": "Defer",                "file": "defer.qlang",              "main": "defer.qlang",              "files": ["defer.qlang"] },
+  { "name": "Macros (Advanced)",    "file": "macros-advanced.qlang",    "main": "macros-advanced.qlang",    "files": ["macros-advanced.qlang"] },
+  { "name": "Structs + Pointers",   "file": "structs-ptr.qlang",        "main": "structs-ptr.qlang",        "files": ["structs-ptr.qlang"] },
+  { "name": "Showcase",             "file": "showcase.qlang",           "main": "showcase.qlang",           "files": ["showcase.qlang"] },
+  { "name": "Hangman",              "file": "hangman.qlang",            "main": "hangman.qlang",            "files": ["hangman.qlang"] },
+  { "name": "Sokoban",              "file": "sokoban.qlang",            "main": "sokoban.qlang",            "files": ["sokoban.qlang"] }
 ]

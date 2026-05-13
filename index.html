@@ -71,11 +71,165 @@
     button#btn-clear { background: transparent; color: var(--muted); }
     button#btn-clear:hover { background: var(--border); color: var(--text); }
 
-    /* ── Example picker ─────────────────────────────────────────────────── */
-    .example-picker {
+    /* ── Project picker ────────────────────────────────────────────────── */
+    .project-picker {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .project-name-input {
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      color: var(--text);
+      font: inherit;
+      font-size: 13px;
+      padding: 2px 6px;
+      min-width: 80px;
+      max-width: 160px;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    .project-name-input:hover  { border-color: var(--border); }
+    .project-name-input:focus  { border-color: var(--accent); outline: none; cursor: text; }
+    .btn-new-project {
+      font-size: 16px;
+      padding: 2px 7px;
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      min-width: unset;
+    }
+    .btn-new-project:hover { color: var(--accent); border-color: var(--accent); background: none; }
+
+    /* ── File tree ───────────────────────────────────────────────────────── */
+    qlang-file-tree {
+      display: flex;
+      flex-direction: column;
+      overflow: auto;
+      padding: 4px 0;
+      flex: 1;
+    }
+    .ft-header {
+      display: flex;
+      align-items: center;
+      padding: 2px 8px;
+      gap: 4px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .ft-project-name {
+      flex: 1;
+      font-size: 11px;
+      color: var(--muted);
+      overflow: hidden;
+      white-space: nowrap;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 3px;
+      padding: 1px 3px;
+      font-family: inherit;
+      min-width: 0;
+    }
+    .ft-project-name:hover { border-color: var(--border); color: var(--text); }
+    .ft-project-name:focus { border-color: var(--accent); outline: none; color: var(--text); }
+    .ft-list { list-style: none; padding: 0; margin: 0; }
+    .ft-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 10px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .ft-item:hover { background: var(--surface); }
+    .ft-item.ft-active { color: var(--accent); background: rgba(137,180,250,0.08); }
+    .ft-icon { font-size: 9px; color: var(--muted); flex-shrink: 0; }
+    .ft-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ft-badge {
+      font-size: 9px;
+      color: var(--muted);
+      background: var(--surface);
+      border-radius: 2px;
+      padding: 0 3px;
+      flex-shrink: 0;
+    }
+    .ft-btn-del {
+      margin-left: auto;
+      opacity: 0;
+      font-size: 10px;
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 1px 4px;
+      flex-shrink: 0;
+    }
+    .ft-item:hover .ft-btn-del { opacity: 1; }
+    .ft-btn-del:hover { color: var(--red); background: none; }
+    .ft-btn-new {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 16px;
+      padding: 0 4px;
+      line-height: 1;
+    }
+    .ft-btn-new:hover { color: var(--accent); background: none; }
+    .ft-btn-del-proj {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 13px;
+      padding: 1px 4px;
+      flex-shrink: 0;
+      line-height: 1;
+      opacity: 0.5;
+    }
+    .ft-btn-del-proj:hover { color: var(--red); opacity: 1; }
+
+    /* ── Tab bar ────────────────────────────────────────────────────────── */
+    .tab-bar {
+      display: flex;
+      align-items: stretch;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      min-height: 26px;
+      overflow-x: auto;
+      flex-shrink: 0;
+    }
+    .tab-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      border-right: 1px solid var(--border);
+      color: var(--muted);
+      white-space: nowrap;
+      user-select: none;
+    }
+    .tab-item:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+    .tab-item.tab-active { color: var(--text); border-bottom: 2px solid var(--accent); background: var(--bg); }
+    .tab-item.tab-entry .tab-name::after { content: ' ●'; font-size: 8px; color: var(--accent); vertical-align: super; }
+    .tab-bar-notice {
+      font-size: 10px;
+      color: var(--muted);
+      padding: 0 8px;
+      align-self: center;
+      margin-left: auto;
+      white-space: nowrap;
+      font-style: italic;
+    }
+
+    /* ── Open project picker ──────────────────────────────────────────────── */
+    .open-project-picker {
       position: relative;
     }
-    #example-list {
+    #project-list {
       position: absolute;
       top: 100%;
       left: 0;
@@ -88,14 +242,39 @@
       min-width: 160px;
       z-index: 100;
     }
-    #example-list li {
+    #project-list li {
       padding: 6px 14px;
       cursor: pointer;
       font-size: 13px;
       white-space: nowrap;
     }
-    #example-list li:hover {
+    #project-list li:hover:not(.project-list-header):not(.project-list-sep) {
       background: var(--accent);
+      color: var(--bg);
+    }
+    #project-list .project-list-header {
+      padding: 6px 14px 3px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      cursor: default;
+      pointer-events: none;
+    }
+    #project-list .project-list-sep {
+      height: 1px;
+      background: var(--border);
+      margin: 4px 0;
+      padding: 0;
+      cursor: default;
+      pointer-events: none;
+    }
+    #project-list .project-list-example {
+      color: var(--muted);
+      font-style: italic;
+    }
+    #project-list .project-list-example:hover {
       color: var(--bg);
     }
 
@@ -803,10 +982,11 @@
 
 <header>
   <h1>QLang IDE</h1>
-  <div class="example-picker">
-    <button id="btn-load-example">Load example ▾</button>
-    <ul id="example-list" hidden></ul>
-  </div>  <button id="btn-ide-tests" onclick="window.open('./tests/smoke.html','_blank')">IDE tests</button>  <qlang-toolbar style="margin-left:auto">
+  <div class="open-project-picker">
+    <button id="btn-open-project">Open project ▾</button>
+    <ul id="project-list" hidden></ul>
+  </div>
+  <button id="btn-new-project" class="btn-new-project" title="New project">+ New project</button>  <button id="btn-ide-tests" onclick="window.open('./tests/smoke.html','_blank')">IDE tests</button>  <qlang-toolbar style="margin-left:auto">
     <button id="btn-compile" data-action="compile">Compile</button>
     <button id="btn-run" data-action="run">▶ Run</button>
     <button id="btn-debug" data-action="debug">⬤ Debug</button>
@@ -816,10 +996,19 @@
 </header>
 
 <main>
-  <!-- Left: source editor + lang docs -->
+  <!-- Left: file tree + source editor + lang docs -->
   <div class="pane">
+
+    <qlang-pane collapsed data-view="files" id="files-pane">
+      <div class="pane-label collapsed" draggable="true">Project</div>
+      <qlang-file-tree id="file-tree"></qlang-file-tree>
+    </qlang-pane>
+
+    <div class="row-handle"></div>
+
     <qlang-pane data-view="source">
-      <div class="pane-label">Source</div>
+      <div class="pane-label" draggable="true">Source</div>
+      <div id="tab-bar" class="tab-bar"></div>
       <qlang-source-view id="main-sv" editable>
         <div id="macro-lens-layer"></div>
       </qlang-source-view>
@@ -829,7 +1018,7 @@
     <div class="row-handle"></div>
 
     <qlang-pane collapsed data-view="lang-docs">
-      <div class="pane-label collapsed">Lang Docs</div>
+      <div class="pane-label collapsed" draggable="true">Lang Docs</div>
       <div id="lang-docs" class="lang-docs-scroll pane-body-hidden"></div>
     </qlang-pane>
   </div>
@@ -917,6 +1106,7 @@
 <script type="module" src="./ide/qlang-error-panel.js"></script>
 <script type="module" src="./ide/qlang-console.js"></script>
 <script type="module" src="./ide/qlang-toolbar.js"></script>
+<script type="module" src="./ide/file-tree.js"></script>
 <script type="module" src="./ide/layout.js"></script>
 <script type="module" src="./ide/main.js"></script>
 <div id="type-tooltip"></div>

@@ -38,6 +38,8 @@ import {
 import { setExpLog, getExpLog } from './ide-state.js';
 import { navigateToRef } from './navigate.js';
 import { initExamples } from './examples.js';
+import { vfs } from './vfs.js';
+import { initProjectUI } from './project-ui.js';
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
@@ -56,6 +58,12 @@ const watRoot     = document.getElementById('wat-root');
 // Component refs (graceful fallback if not yet upgraded)
 const errorPanel   = document.getElementById('error-panel');
 const consolePanel = document.getElementById('console-panel');
+
+// VFS + layout refs
+const fileTreeEl       = document.getElementById('file-tree');
+const tabBar           = document.getElementById('tab-bar');
+const filesPane        = document.getElementById('files-pane');
+const projectNameInput = document.getElementById('project-name');
 
 // Register mainSv as the view for 'main' source so debugger.js can route
 // highlightInSource('main', ...) to it (same mechanism as macro panel views).
@@ -183,12 +191,17 @@ function triggerLiveCompile(src) {
   }, 150);
 }
 editor.addEventListener('input', () => {
+  // Save active file to VFS before compiling
+  const _activePath = vfs.activeProject?.activeFile ?? 'main.qlang';
+  vfs.setFile(_activePath, getEditorText());
+  vfs.save();
+
   setCompiled(false);
   lastWasmBytes = null;
   const errRanges = getLastErrorRanges();
   applyHighlight(errRanges.length > 0 ? errRanges : null);
   requestAnimationFrame(updateAc);
-  triggerLiveCompile(getEditorText());
+  triggerLiveCompile(getCompileSource());
 });
 
 editor.addEventListener('keydown', e => {
@@ -232,7 +245,7 @@ function applyGenerateResult(ast) {
 btnCompile.addEventListener('click', () => {
   clearOutputs();
   try {
-    const src             = getEditorText();
+    const src             = getCompileSource();
     const { tokens, ast, expLog, parseErrors } = compile(src);
     setLastTokens(tokens);
     setLastAst(ast);
@@ -505,13 +518,58 @@ initDebugger(generate, log, {
   consolePanel,
 });
 
-// ── Load default example + startup compile ─────────────────────────────────
+// ── VFS helpers ───────────────────────────────────────────────────────────────
 
-fetch(new URL('../examples/showcase.qlang', import.meta.url))
-  .then(r => r.text())
-  .then(text => { text = text.replace(/\r\n/g, '\n'); mainSv.setText(text); triggerLiveCompile(text); })
-  .catch(() => triggerLiveCompile(''));
+/** Always compiles main.qlang, regardless of which file is open in the editor. */
+function getCompileSource() {
+  return vfs.getFile('main.qlang') ?? '';
+}
 
-// ── Examples picker ────────────────────────────────────────────────────
+// ── Project UI init (file tree, tab bar, event handlers) ──────────────────────
 
-initExamples(text => { mainSv.setText(text); setCompiled(false); triggerLiveCompile(text); });
+const activateProject = initProjectUI({
+  vfs, mainSv, fileTreeEl, tabBar, filesPane, projectNameInput,
+  getEditorText, getCompileSource, triggerLiveCompile, setCompiled, clearOutputs,
+});
+
+// ── Startup: load VFS, show content ──────────────────────────────────────────
+
+vfs.load();
+
+const _startProj = vfs.activeProject;
+if (!_startProj?.getFile('main.qlang')?.trim()) {
+  // First run or blank project — seed with showcase.qlang
+  fetch(new URL('../examples/showcase.qlang', import.meta.url))
+    .then(r => r.text())
+    .then(text => {
+      text = text.replace(/\r\n/g, '\n');
+      vfs.setFile('main.qlang', text);
+      vfs.save();
+      activateProject(vfs.activeProject);
+    })
+    .catch(() => activateProject(vfs.activeProject));
+} else {
+  activateProject(_startProj);
+}
+
+// ── Examples picker ────────────────────────────────────────────────────────────
+
+initExamples(
+  ({ name, texts }) => {
+    const proj = vfs.createProject(name, Object.fromEntries(texts), { isExample: true });
+    vfs.save();
+    setCompiled(false);
+    clearOutputs();
+    activateProject(proj);
+  },
+  {
+    getProjects: () => [...vfs.projects.values()],
+    onProjectOpen: proj => {
+      vfs.setActiveProject(proj.id);
+      vfs.save();
+      setCompiled(false);
+      clearOutputs();
+      activateProject(proj);
+    },
+  }
+);

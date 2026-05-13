@@ -18,6 +18,7 @@ import './test-ide-logic.js';
 import './test-ide-ui.js';
 import './test-namespace.js';
 import './test-ide-smoke.js';
+import './test-vfs.js';
 import { summarize } from './helpers.js';
 
 summarize();
