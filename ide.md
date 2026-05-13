@@ -1,6 +1,6 @@
 # QLang IDE — Dokumentacja edytora i interfejsu
 
-> Stan na: 2026-04-12 (aktualizacja: Worker-based Run+Debug; zunifikowany wasm-runner.js; konsola kolorowa; Stop button w toolbarze; dbg-stop usunięty z panelu debuggera)
+> Stan na: 2026-05-13 (aktualizacja: multi-file project support — VFS, file-tree, tab bar; "Open project" dropdown z user projects + examples; pane Files → Project z rename/delete; example projects session-only, nie persystowane)
 > Wydzielone z archDetail.md i langDetail.md.
 
 ---
@@ -11,6 +11,10 @@
 
 - `index.html` — cały layout w jednym pliku, zero frameworków
 - `main.js` — ES module entry point, klej IDE ↔ kompilator; `<script type="module">`
+- `ide/vfs.js` — **Virtual File System** — `Project` (pliki jako Map) + `VFS` (wiele projektów); persystencja przez `localStorage` (`qlang-vfs-v1`); eksportuje singleton `vfs`; `isExample: true` → projekt sesyjny, nie zapisywany przy `save()`; `#lastUserActiveId` — przy `save()` gdy aktywny projekt to example, jako `activeId` w storage zapisywany jest ostatni nie-example
+- `ide/file-tree.js` — `<qlang-file-tree>` Web Component (Light DOM); API: `setFiles(paths, activePath, projectName)`, `set activePath`; header z edytowalnym `<input>` (rename projektu), przyciskiem 🗑 (delete projektu) i `+` (new file); zdarzenia bubbling: `ft-file-select`, `ft-file-create`, `ft-file-delete`, `ft-file-rename`, `ft-project-rename`, `ft-project-delete`
+- `ide/project-ui.js` — `initProjectUI(deps)` → `activateProject(proj)`; obsługuje wszystkie zdarzenia file-tree; renderuje tab bar; `ft-project-rename` → `proj.name = ...`; `ft-project-delete` → `confirm()` + `vfs.deleteProject()` + przełącz na następny projekt; `btn-new-project` → `prompt('Project name:')` → `vfs.createProject(name)`
+- `ide/examples.js` — `initExamples(onLoad, { getProjects, onProjectOpen })` — dropdown "Open project"; lista przebudowywana przy każdym otwarciu; sekcja "My projects" (bez example projektów) + separator + sekcja "Examples" (kursywa, muted); `onLoad({ name, texts: Map })` wywoływane po załadowaniu plików przykładu; `onProjectOpen(proj)` — otwiera istniejący projekt VFS
 - `views.js` — renderery widoków: `syntaxHighlight`, `renderWAT`, `renderBytecode`, `classifyWasmBytes`, `findWatSpan`, `findByteSpan`
 - `ide/source-view.js` — `<qlang-source-view>` Web Component (Light DOM, zero Shadow DOM); dwa tryby: `editable` i read-only; API: `setText`, `setContent`, `getText`, `scrollToOffset`, `set hoverData`, `setBpLines`, `highlightNode`, `highlightRange`, `addHighlightRange`, `setHighlights`, `clearHighlight`; CSS klasy rektów: `sv-hl-rect` (niebieski), `sv-hl-dimmed` (żółty), `sv-hl-active` (pomarańczowo-czerwony kontur); Events: `sv-gutter-click { line }`, `sv-node-click { node }`; `_storedHighlights` + scroll listener + `ResizeObserver` (redraw przy scrollu/resize); **diagnostyczne `console.warn`** przy 4 silent exit points w `_appendRect`
 - `ide/highlight.js` — **Koordynator podświetleń** (jeden moduł zna DOM wszystkich widoków); eksportuje `initHighlight`, `highlightAndScrollSource`, `addSourceHighlight`, `clearAllSourceHighlights`, `applyChainHighlights`, `highlightAst`, `highlightAstWithStmt`, `highlightWat`, `highlightBytecode`, `clearAll`, `setOnMissingView`; `highlightAndScrollSource` wywołuje `_onMissingView(sourceId)` gdy `getView()` zwraca null — macro-panel.js rejestruje callback auto-otwierający panel; wszystkie inne moduły IDE delegują do niego zamiast bezpośrednio manipulować DOM; **diagnostyczne `console.warn`** przy każdym null-guard (`_outAst`/`_watRoot`/`_outBytecode` nie zainicjalizowane)
@@ -29,6 +33,7 @@
 - `compiler/source-buffer.js` — `SourceBuffer { id, text, tokens, kind, callSite }` z fabrykami `forMain()`, `forMacro()`; gettery `root`, `parent`, `depth`
 - `lsp.js` — narzędzia edytora: `updateAc`, `syncAstHighlight`, `buildLineIndex`, `getLastLineIndex`, `getScopeItems`, `getNamespaceMembers`, `resolveChainedType`; obsługuje autocomplete (3 tryby: general, dot, ::), type-aware member suggestions
 - `ide/hover.js` — hover data builder: `HINTS` (statyczne definicje), `buildHoverData` (AST walker → `HoverEntry[]`); obsługuje Identifier, VarDecl, FuncDecl, Param, StructDecl, StructField, MemberExpr, UnaryExpr, NamespaceDecl, NamespacedDecl, QualifiedName, MacroCallStmt
+- **Nagłówek**: przyciski Compile | ▶ Run | ⬤ Debug | ⏹ Stop | Clear w `<qlang-toolbar>`; **+ New project** (tworzy nowy projekt przez `prompt`); **Open project ▾** (dropdown z sekcją "My projects" + "Examples")
 - **Trzy kolumny**: Edytor | AST + Bytecode + Debugger (stacked) | WAT Explorer + Konsola + Błędy (stacked)
 - Layout: `body { height: 100dvh; overflow: hidden }` — brak zewnętrznego scrolla
 - Kolumny i widoki są rozciągane uchwytem (drag handle); widoki można przenosić między kolumnami i zmieniać ich kolejność (drag & drop)
@@ -288,6 +293,63 @@ Jednolity komponent widoku źródła — używany w obu miejscach:
 - Pobiera `getCaretOffset()`, szuka **najciaśniejszego** elementu `[data-start]` spełniającego `s <= offset <= e`
 - Fallback: `[data-line]` gdy brak offsetów
 - `ast-renderer.js` emituje `data-start` / `data-end` na każdym węźle `<details>`
+
+---
+
+## 13. Multi-file projects (VFS)
+
+### VFS (`ide/vfs.js`)
+
+```
+vfs.projects           — Map<id, Project> (getter publiczny, read-only)
+vfs.activeProject      — aktualnie aktywny Project lub null
+vfs.createProject(name, files?, { isExample? }) → Project
+vfs.deleteProject(id)
+vfs.renameProject(id, newName)
+vfs.setActiveProject(id)
+vfs.setFile / getFile / createFile / deleteFile / renameFile
+vfs.save() / vfs.load()
+```
+
+- Klucz localStorage: `qlang-vfs-v1`
+- Invarianty: `main.qlang` zawsze istnieje w projekcie i nie może być usunięte/zmienione
+- `isExample: true` → projekt sesyjny: `save()` go pomija; po odświeżeniu strony znika
+- `#lastUserActiveId` — gdy aktywny jest example-project, `save()` zapisuje ostatni user-project jako `activeId`
+
+### Pane „Project" (`<qlang-file-tree>`)
+
+Prawy górny panel (dawny „Files") — pokazuje pliki bieżącego projektu:
+
+- Header: `<input>` z nazwą projektu (edytowalne inline → `ft-project-rename`), przycisk 🗑 (→ `ft-project-delete`) i `+` (→ `ft-file-create`)
+- Lista plików: `main.qlang` zawsze pierwszy z badge `entry`; pozostałe z przyciskiem ✕; dblclick → inline rename
+- `ft-file-select` → przełącza aktywny plik w edytorze
+- `ft-project-delete` → `confirm()` + `vfs.deleteProject()` + przełącz na inny projekt; blokowany gdy jeden projekt
+
+### Tab bar (`#tab-bar`)
+
+Wyświetlany powyżej edytora; jeden tab per plik aktywnego projektu:
+- `tab-entry` class na `main.qlang` (oznacznik `●`)
+- Aktywny tab: `tab-active`, kursyw informacja „Editing X — only main.qlang is compiled" gdy edytowany nie-main
+
+### Dropdown „Open project"
+
+Przycisk **Open project ▾** w nagłówku — lista przebudowywana przy każdym otwarciu:
+```
+MY PROJECTS          ← bold uppercase header
+  User project 1
+  User project 2
+ ─────────────────   ← 1px separator
+EXAMPLES             ← bold uppercase header
+  Fibonacci          ← italic, muted
+  Hangman            ← italic, muted
+  …
+```
+- Wybór projektu użytkownika → `onProjectOpen(proj)` → `vfs.setActiveProject` + `activateProject`
+- Wybór przykładu → `fetch` wszystkich plików → `vfs.createProject(name, files, { isExample: true })` → `activateProject`
+
+### Przycisk „+ New project"
+
+Obok „Open project" w headerze → `prompt('Project name:')` → `vfs.createProject(name)` → `activateProject`
 
 ---
 

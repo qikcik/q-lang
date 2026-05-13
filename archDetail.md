@@ -1,6 +1,6 @@
 # QLang — Architektura Szczegółowa
 
-> Stan na: 2026-04-12 (aktualizacja: **`else if`** w parserze; **unary minus (`-`)** w parser/typeinfer/emitter; Worker-based Run+Debug via wasm-runner.js; 7-state SharedArrayBuffer protocol; konsola kolorowa; Stop w toolbarze; dbg-stop usunięty; **`defer`** — naprawa flushu przy zagnieżdżonych `return` w `defer-pass.js`; **`collectLocalDecls`** — deduplicacja węzłów AST współdzielonych przez defer-pass)
+> Stan na: 2026-05-13 (aktualizacja: **`else if`** w parserze; **unary minus (`-`)** w parser/typeinfer/emitter; Worker-based Run+Debug via wasm-runner.js; 7-state SharedArrayBuffer protocol; konsola kolorowa; Stop w toolbarze; dbg-stop usunięty; **`defer`** — naprawa flushu przy zagnieżdżonych `return` w `defer-pass.js`; **`collectLocalDecls`** — deduplicacja węzłów AST współdzielonych przez defer-pass; **multi-file project** — VFS, file-tree, tab bar, "Open project" dropdown)
 > Iteracyjnie uzupełniana przy każdym zrealizowanym todo.
 > Wprowadzenie i big picture: [archIntro.md](archIntro.md)
 
@@ -24,6 +24,10 @@
 index.html               — QLang IDE UI (edytor, przyciski, panele)
 ide/
   main.js                — Entry point (ES module): compile/run/debug + inicjalizacja; importuje macro-panel.js
+  vfs.js                 — Virtual File System: Project (pliki jako Map) + VFS (wiele projektów); localStorage persistence; `isExample` flag − session-only projects not saved
+  file-tree.js           — <qlang-file-tree> Web Component: setFiles(), ft-file-* + ft-project-rename/delete events; editable project name input
+  project-ui.js          — initProjectUI(deps) → activateProject; obsługa file-tree events, tab bar, new-project, rename/delete project
+  examples.js            — initExamples(onLoad, { getProjects, onProjectOpen }): "Open project" dropdown; sekcje My projects + Examples
   views.js               — Renderery widoków: syntaxHighlight, renderWAT, renderBytecode
   source-view.js         — <qlang-source-view> Web Component: editable (edytor) + read-only (panel makra)
   qlang-pane.js          — <qlang-pane> Web Component: strukturalny wrapper paneli
@@ -79,6 +83,7 @@ tests/
   test-ide-logic.js      — Suity: autocomplete logic, getScopeItems, resolveChainedType
   test-ide-ui.js         — Suity: IDE UI behavior, auto-indent
   test-ide-smoke.js      — Suity: DOM IDs, pliki IDE, pipeline shape, hover data, Web Component tagi
+  test-vfs.js            — Suity: VFS Project, createProject, persistence, isExample session-only behaviour
   test-ast-renderer.js   — Suity: AST rendering
   package.json           — { "type": "module" }
 start.js                 — Serwer deweloperski Node.js: COOP/COEP headers + no-cache; wymagany dla SharedArrayBuffer
