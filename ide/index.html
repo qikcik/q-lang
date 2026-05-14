@@ -144,23 +144,89 @@
       text-transform: uppercase;
       letter-spacing: 0.08em;
       color: var(--muted);
-      padding: 4px 12px;
+      padding: 4px 30px 4px 12px;
       background: var(--surface);
       border-bottom: 1px solid var(--border);
       flex-shrink: 0;
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      justify-content: flex-start;
       cursor: pointer;
       user-select: none;
+      position: relative;
     }
     .pane-label::after {
       content: '\25BE';
       font-size: 10px;
       color: var(--muted);
       transition: transform 0.15s;
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
     }
-    .pane-label.collapsed::after { transform: rotate(-90deg); }
+    .pane-tools {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-left: auto;
+      margin-right: 10px;
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: none;
+      letter-spacing: normal;
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .pane-tools .pane-tools-label {
+      font-size: 10px;
+      color: var(--muted);
+    }
+    .pane-tools input[type="checkbox"] {
+      position: absolute;
+      opacity: 0;
+      width: 0;
+      height: 0;
+      pointer-events: none;
+    }
+    .pane-toggle-track {
+      width: 26px;
+      height: 14px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: color-mix(in srgb, var(--bg) 75%, var(--surface));
+      position: relative;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+    .pane-toggle-thumb {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      position: absolute;
+      top: 1px;
+      left: 1px;
+      background: var(--muted);
+      transition: transform 0.15s ease, background 0.15s ease;
+    }
+    .pane-tools input[type="checkbox"]:checked + .pane-toggle-track {
+      border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+      background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+    }
+    .pane-tools input[type="checkbox"]:checked + .pane-toggle-track .pane-toggle-thumb {
+      transform: translateX(12px);
+      background: var(--accent);
+    }
+    .pane-tools:hover .pane-toggle-track {
+      border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+    }
+    .pane-tools input[type="checkbox"]:disabled + .pane-toggle-track {
+      opacity: 0.5;
+    }
+    .pane-tools input[type="checkbox"]:disabled ~ .pane-tools-label {
+      opacity: 0.55;
+    }
+    .pane-label.collapsed::after { transform: translateY(-50%) rotate(-90deg); }
     .pane-body-hidden { display: none !important; }
     .pane-collapsed { flex: 0 0 auto !important; min-height: 0 !important; }
 
@@ -936,7 +1002,13 @@
     <div class="row-handle"></div>
 
     <qlang-pane data-view="canvas">
-      <div class="pane-label" draggable="true">Game Canvas</div>
+      <div class="pane-label" draggable="true">Game Canvas
+        <label class="pane-tools" data-pane-control title="Toggle telemetry diagnostics for next Run">
+          <input id="game-telemetry-toggle" type="checkbox" checked>
+          <span class="pane-toggle-track" aria-hidden="true"><span class="pane-toggle-thumb"></span></span>
+          <span class="pane-tools-label">Telemetry</span>
+        </label>
+      </div>
       <qlang-canvas id="game-canvas">
         <canvas></canvas>
       </qlang-canvas>

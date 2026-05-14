@@ -60,6 +60,7 @@ const watRoot     = document.getElementById('wat-root');
 const errorPanel   = document.getElementById('error-panel');
 const consolePanel = document.getElementById('console-panel');
 const gameCanvas   = document.getElementById('game-canvas');
+const gameTelemetryToggle = document.getElementById('game-telemetry-toggle');
 
 // VFS + layout refs
 const fileTreeEl       = document.getElementById('file-tree');
@@ -109,6 +110,7 @@ function _syncButtons() {
   btnCompile.disabled = busy;
   btnRun.disabled     = !_compiled || busy;
   btnStop.disabled    = !busy;
+  if (gameTelemetryToggle) gameTelemetryToggle.disabled = busy;
   const btnDebug = document.getElementById('btn-debug');
   if (btnDebug) btnDebug.disabled = !_compiled || busy;
 }
@@ -305,21 +307,147 @@ const STATE_READY    =  2;
 const STATE_EXT_WAIT =  6;   // Worker blocked waiting for RAF tick (game loop)
 const STATE_ABORT    = -1;
 const SHARED_BUF_SIZE = 8 + 1024;
+const GAME_DIAG = true;
+const GAME_DIAG_PERIOD_MS = 2000;
+const GAME_WAKE_FPS = 60;
+const GAME_WAKE_MIN_MS = 1000 / GAME_WAKE_FPS;
 
 let _runWorker   = null;   // active Worker, if any
 let _rafId       = null;   // requestAnimationFrame id for game loop
 let _gameRunCtrl = null;   // Int32Array ctrl SAB ref, used by RAF loop
 let _presentRafId = null;  // requestAnimationFrame id for frame presentation
 let _pendingBitmap = null; // latest frame waiting to be blitted
+let _gameDiag = null;
+let _longTaskObserver = null;
+
+function _newDiagStat() {
+  return { n: 0, sum: 0, max: 0 };
+}
+
+function _diagSample(stat, value) {
+  if (!Number.isFinite(value) || value < 0) return;
+  stat.n++;
+  stat.sum += value;
+  if (value > stat.max) stat.max = value;
+}
+
+function _diagAvg(stat) {
+  return stat.n > 0 ? (stat.sum / stat.n) : 0;
+}
+
+function _isGameTelemetryEnabled() {
+  return gameTelemetryToggle?.checked ?? true;
+}
+
+function _createGameDiag(enabled = true) {
+  const now = performance.now();
+  return {
+    enabled: GAME_DIAG && enabled,
+    lastFlush: now,
+    lastRxAt: 0,
+    lastPresentAt: 0,
+    lastRafTickAt: 0,
+    rxFrames: 0,
+    presentedFrames: 0,
+    replacedPending: 0,
+    extWakeSignals: 0,
+    wakeSkipped: 0,
+    lastWakeAt: 0,
+    rxDeltaMs: _newDiagStat(),
+    presentDeltaMs: _newDiagStat(),
+    queueLagMs: _newDiagStat(),
+    rafDeltaMs: _newDiagStat(),
+    wakeDeltaMs: _newDiagStat(),
+    longTaskCount: 0,
+    longTaskTotalMs: 0,
+    longTaskMaxMs: 0,
+  };
+}
+
+function _startLongTaskObserver() {
+  if (!_gameDiag?.enabled) return;
+  if (typeof window === 'undefined' || typeof PerformanceObserver === 'undefined') return;
+  const supported = PerformanceObserver.supportedEntryTypes?.includes?.('longtask');
+  if (!supported) return;
+  try {
+    _longTaskObserver = new PerformanceObserver((list) => {
+      if (!_gameDiag?.enabled) return;
+      for (const entry of list.getEntries()) {
+        _gameDiag.longTaskCount++;
+        _gameDiag.longTaskTotalMs += entry.duration;
+        if (entry.duration > _gameDiag.longTaskMaxMs) _gameDiag.longTaskMaxMs = entry.duration;
+      }
+    });
+    _longTaskObserver.observe({ entryTypes: ['longtask'] });
+    log('console', '[diag-main] longtask observer enabled');
+  } catch {
+    _longTaskObserver = null;
+  }
+}
+
+function _stopLongTaskObserver() {
+  if (!_longTaskObserver) return;
+  try { _longTaskObserver.disconnect(); } catch {}
+  _longTaskObserver = null;
+}
+
+function _maybeFlushGameDiag(reason = 'periodic') {
+  if (!_gameDiag?.enabled) return;
+  const now = performance.now();
+  if (reason === 'periodic' && (now - _gameDiag.lastFlush) < GAME_DIAG_PERIOD_MS) return;
+  const d = _gameDiag;
+  const longTaskAvg = d.longTaskCount > 0 ? (d.longTaskTotalMs / d.longTaskCount) : 0;
+  log('console',
+    `[diag-main:${reason}] rx=${d.rxFrames} present=${d.presentedFrames} ` +
+    `drop=${d.replacedPending} wake=${d.extWakeSignals} wakeSkip=${d.wakeSkipped} ` +
+    `rxAvg=${_diagAvg(d.rxDeltaMs).toFixed(2)}ms rxMax=${d.rxDeltaMs.max.toFixed(2)}ms ` +
+    `presentAvg=${_diagAvg(d.presentDeltaMs).toFixed(2)}ms presentMax=${d.presentDeltaMs.max.toFixed(2)}ms ` +
+    `queueAvg=${_diagAvg(d.queueLagMs).toFixed(2)}ms queueMax=${d.queueLagMs.max.toFixed(2)}ms ` +
+    `rafAvg=${_diagAvg(d.rafDeltaMs).toFixed(2)}ms rafMax=${d.rafDeltaMs.max.toFixed(2)}ms ` +
+    `wakeAvg=${_diagAvg(d.wakeDeltaMs).toFixed(2)}ms wakeMax=${d.wakeDeltaMs.max.toFixed(2)}ms ` +
+    `lt=${d.longTaskCount} ltAvg=${longTaskAvg.toFixed(2)}ms ltMax=${d.longTaskMaxMs.toFixed(2)}ms`
+  );
+  d.lastFlush = now;
+  d.rxFrames = 0;
+  d.presentedFrames = 0;
+  d.replacedPending = 0;
+  d.extWakeSignals = 0;
+  d.wakeSkipped = 0;
+  d.rxDeltaMs = _newDiagStat();
+  d.presentDeltaMs = _newDiagStat();
+  d.queueLagMs = _newDiagStat();
+  d.rafDeltaMs = _newDiagStat();
+  d.wakeDeltaMs = _newDiagStat();
+  d.longTaskCount = 0;
+  d.longTaskTotalMs = 0;
+  d.longTaskMaxMs = 0;
+}
 
 function startGameRaf(ctrl) {
   if (_rafId !== null) return;  // idempotent
   _gameRunCtrl = ctrl;
   function tick() {
-    if (Atomics.load(ctrl, 0) === STATE_EXT_WAIT) {
-      Atomics.store(ctrl, 0, STATE_IDLE);
-      Atomics.notify(ctrl, 0, 1);
+    const now = performance.now();
+    if (_gameDiag?.enabled) {
+      if (_gameDiag.lastRafTickAt > 0) _diagSample(_gameDiag.rafDeltaMs, now - _gameDiag.lastRafTickAt);
+      _gameDiag.lastRafTickAt = now;
     }
+    if (Atomics.load(ctrl, 0) === STATE_EXT_WAIT) {
+      const lastWakeAt = _gameDiag?.lastWakeAt ?? 0;
+      const sinceWake = lastWakeAt > 0 ? (now - lastWakeAt) : Infinity;
+      if (sinceWake >= GAME_WAKE_MIN_MS) {
+        Atomics.store(ctrl, 0, STATE_IDLE);
+        Atomics.notify(ctrl, 0, 1);
+        if (_gameDiag?.enabled) {
+          _gameDiag.extWakeSignals++;
+          if (lastWakeAt > 0) _diagSample(_gameDiag.wakeDeltaMs, sinceWake);
+          _gameDiag.lastWakeAt = now;
+        }
+      } else if (_gameDiag?.enabled) {
+        _gameDiag.wakeSkipped++;
+      }
+    }
+    _maybeFlushGameDiag('periodic');
     _rafId = requestAnimationFrame(tick);
   }
   _rafId = requestAnimationFrame(tick);
@@ -328,20 +456,40 @@ function startGameRaf(ctrl) {
 function stopGameRaf() {
   if (_rafId !== null) { cancelAnimationFrame(_rafId); _rafId = null; }
   if (_presentRafId !== null) { cancelAnimationFrame(_presentRafId); _presentRafId = null; }
-  if (_pendingBitmap?.close) _pendingBitmap.close();
+  if (_pendingBitmap?.bitmap?.close) _pendingBitmap.bitmap.close();
   _pendingBitmap = null;
+  _maybeFlushGameDiag('stop');
+  _stopLongTaskObserver();
+  _gameDiag = null;
   _gameRunCtrl = null;
 }
 
 function scheduleFramePresent(bitmap) {
-  if (_pendingBitmap?.close) _pendingBitmap.close();
-  _pendingBitmap = bitmap;
+  const now = performance.now();
+  if (_gameDiag?.enabled) {
+    if (_gameDiag.lastRxAt > 0) _diagSample(_gameDiag.rxDeltaMs, now - _gameDiag.lastRxAt);
+    _gameDiag.lastRxAt = now;
+    _gameDiag.rxFrames++;
+  }
+  if (_pendingBitmap?.bitmap?.close) {
+    _pendingBitmap.bitmap.close();
+    if (_gameDiag?.enabled) _gameDiag.replacedPending++;
+  }
+  _pendingBitmap = { bitmap, queuedAt: now };
   if (_presentRafId !== null) return;
   _presentRafId = requestAnimationFrame(() => {
     _presentRafId = null;
-    const bmp = _pendingBitmap;
+    const pending = _pendingBitmap;
     _pendingBitmap = null;
-    if (bmp) gameCanvas?.blit?.(bmp);
+    if (!pending) return;
+    if (_gameDiag?.enabled) {
+      const presentNow = performance.now();
+      if (_gameDiag.lastPresentAt > 0) _diagSample(_gameDiag.presentDeltaMs, presentNow - _gameDiag.lastPresentAt);
+      _gameDiag.lastPresentAt = presentNow;
+      _diagSample(_gameDiag.queueLagMs, presentNow - pending.queuedAt);
+      _gameDiag.presentedFrames++;
+    }
+    gameCanvas?.blit?.(pending.bitmap);
   });
 }
 
@@ -369,6 +517,10 @@ btnRun.addEventListener('click', () => {
 
   const worker = new Worker(new URL('./wasm-runner.js', import.meta.url), { type: 'module' });
   _runWorker = worker;
+  const telemetryEnabled = _isGameTelemetryEnabled();
+  _gameDiag = _createGameDiag(telemetryEnabled);
+  if (_gameDiag.enabled) log('console', '[diag-main] telemetry enabled (2s window)');
+  _startLongTaskObserver();
 
   worker.onerror = () => {
     log('console', 'Worker failed to start');
@@ -408,6 +560,16 @@ btnRun.addEventListener('click', () => {
       case 'frame':
         scheduleFramePresent(data.bitmap);
         break;
+      case 'diag-gfx': {
+        const m = data.metrics ?? {};
+        log('console',
+          `[diag-worker] frames=${m.frames ?? 0} ` +
+          `frameAvg=${(m.frameAvgMs ?? 0).toFixed(2)}ms frameMax=${(m.frameMaxMs ?? 0).toFixed(2)}ms ` +
+          `waitAvg=${(m.waitAvgMs ?? 0).toFixed(2)}ms waitMax=${(m.waitMaxMs ?? 0).toFixed(2)}ms ` +
+          `activeAvg=${(m.activeAvgMs ?? 0).toFixed(2)}ms activeMax=${(m.activeMaxMs ?? 0).toFixed(2)}ms`
+        );
+        break;
+      }
       case 'warn':
         log('console', '⚠ ' + data.message);
         break;
@@ -439,7 +601,7 @@ btnRun.addEventListener('click', () => {
   const bytesCopy = lastWasmBytes.slice();
   const transfer = [bytesCopy.buffer];
   worker.postMessage(
-    { bytes: bytesCopy, sharedBuf, mode: 'run', wasmImports: lastWasmImports },
+    { bytes: bytesCopy, sharedBuf, mode: 'run', wasmImports: lastWasmImports, telemetryEnabled },
     transfer,
   );
 });

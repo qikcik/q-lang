@@ -28,6 +28,8 @@ const STATE_DBG_STEP  =  4;   // Debug: resume, pause at next brk()
 const STATE_DBG_CONT  =  5;   // Debug: resume, pause only at breakpoints
 const STATE_EXT_WAIT  =  6;   // Worker waiting for external signal (begin_frame / init_window)
 const STATE_ABORT     = -1;
+const GAME_DIAG = true;
+const GAME_DIAG_PERIOD_MS = 2000;
 
 import { WebGL2Renderer } from './gfx-renderer.js';
 
@@ -35,8 +37,23 @@ class AbortExecution {}
 
 const decoder = new TextDecoder('utf-8');
 
+function newDiagStat() {
+  return { n: 0, sum: 0, max: 0 };
+}
+
+function diagSample(stat, value) {
+  if (!Number.isFinite(value) || value < 0) return;
+  stat.n++;
+  stat.sum += value;
+  if (value > stat.max) stat.max = value;
+}
+
+function diagAvg(stat) {
+  return stat.n > 0 ? (stat.sum / stat.n) : 0;
+}
+
 self.onmessage = async ({ data }) => {
-  const { bytes, sharedBuf, mode, breakpoints: bpArr, wasmImports = [] } = data;
+  const { bytes, sharedBuf, mode, breakpoints: bpArr, wasmImports = [], telemetryEnabled = true } = data;
   const isDebug     = mode === 'debug';
   const breakpoints = new Set(bpArr ?? []);
 
@@ -54,6 +71,38 @@ self.onmessage = async ({ data }) => {
   let prevKeyArr     = new Int32Array(4);  // previous-frame key state for is_key_pressed
   let _lastFrameMs   = 16.67;
   let _lastFrameStart = 0;
+  let _frameActiveStart = 0;
+  let _diag = {
+    enabled: GAME_DIAG && telemetryEnabled,
+    lastFlush: performance.now(),
+    frames: 0,
+    frameMs: newDiagStat(),
+    waitMs: newDiagStat(),
+    activeMs: newDiagStat(),
+  };
+
+  function maybeFlushDiag(reason = 'periodic') {
+    if (!_diag.enabled) return;
+    const now = performance.now();
+    if (reason === 'periodic' && (now - _diag.lastFlush) < GAME_DIAG_PERIOD_MS) return;
+    self.postMessage({
+      type: 'diag-gfx',
+      metrics: {
+        frames: _diag.frames,
+        frameAvgMs: diagAvg(_diag.frameMs),
+        frameMaxMs: _diag.frameMs.max,
+        waitAvgMs: diagAvg(_diag.waitMs),
+        waitMaxMs: _diag.waitMs.max,
+        activeAvgMs: diagAvg(_diag.activeMs),
+        activeMaxMs: _diag.activeMs.max,
+      },
+    });
+    _diag.lastFlush = now;
+    _diag.frames = 0;
+    _diag.frameMs = newDiagStat();
+    _diag.waitMs = newDiagStat();
+    _diag.activeMs = newDiagStat();
+  }
 
   // All host functions available to extern! declarations
   const hostFunctions = {
@@ -82,17 +131,25 @@ self.onmessage = async ({ data }) => {
         // Copy current key state to prev (for is_key_pressed)
         for (let i = 0; i < 4; i++) prevKeyArr[i] = Atomics.load(inputArr, i);
         Atomics.store(ctrl, 0, STATE_EXT_WAIT);
+        const waitStart = performance.now();
         Atomics.wait(ctrl, 0, STATE_EXT_WAIT);
+        diagSample(_diag.waitMs, performance.now() - waitStart);
         if (Atomics.load(ctrl, 0) === STATE_ABORT) throw new AbortExecution();
         renderer.beginFrame();
+        _frameActiveStart = performance.now();
       },
 
       end_frame: () => {
         if (!renderer) return;
+        const activeMs = _frameActiveStart > 0 ? (performance.now() - _frameActiveStart) : 0;
         const bitmap = renderer.endFrame();
         self.postMessage({ type: 'frame', bitmap }, [bitmap]);
         _lastFrameMs    = performance.now() - _lastFrameStart;
         _lastFrameStart = performance.now();
+        _diag.frames++;
+        diagSample(_diag.frameMs, _lastFrameMs);
+        diagSample(_diag.activeMs, activeMs);
+        maybeFlushDiag('periodic');
       },
 
       window_should_close: () => 0,  // always false in v1 (web)
@@ -192,9 +249,11 @@ self.onmessage = async ({ data }) => {
     const t0      = performance.now();
     const result  = mainFn();
     const elapsed = performance.now() - t0;
+    maybeFlushDiag('done');
     self.postMessage({ type: 'done', result, elapsed });
   } catch (e) {
     if (e instanceof AbortExecution) {
+      maybeFlushDiag('abort');
       self.postMessage({ type: 'done', result: undefined, elapsed: 0 });
     } else {
       self.postMessage({ type: 'error', message: e.message });

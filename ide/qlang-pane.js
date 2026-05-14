@@ -53,8 +53,22 @@ class QLangPane extends HTMLElement {
       this._applyCollapsed(true);
     }
 
+    // Interactive controls in the label (e.g., telemetry toggle) should not
+    // trigger pane collapse or drag-and-drop behavior.
+    this.querySelectorAll('[data-pane-control]').forEach(ctrl => {
+      ctrl.addEventListener('mousedown', e => e.stopPropagation());
+      ctrl.addEventListener('click', e => e.stopPropagation());
+      ctrl.addEventListener('dragstart', e => {
+        e.stopPropagation();
+        e.preventDefault();
+      });
+    });
+
     // ── Collapse click handler ──────────────────────────────────────────
-    this._labelEl.addEventListener('click', () => this.toggleCollapse());
+    this._labelEl.addEventListener('click', (e) => {
+      if (e.target?.closest?.('[data-pane-control]')) return;
+      this.toggleCollapse();
+    });
   }
 
   toggleCollapse() {
