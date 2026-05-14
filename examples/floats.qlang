@@ -14,11 +14,11 @@
 //   array average     — sumowanie i32 tablicy jako f64, podział
 
 // ── Print helpers ─────────────────────────────────────────────────────────────
-
+print : fn(ptr<u8>, i32) void = extern!("env.write_utf8");
 printByte := fn(b: u8) void {
     ch : array<mut u8, 1> = { 0 };
     ch.[0] = b;
-    ext::print(&ch, 1);
+    print(&ch, 1);
 };
 
 printInt := fn(n: i32) void {
@@ -31,7 +31,7 @@ printInt := fn(n: i32) void {
 };
 
 printLabelAndInt := fn(label: ptr<u8>, labelLen: u32, n: i32) void {
-    ext::print(label, labelLen);
+    print(label, labelLen);
     printInt(n);
     printByte('\n');
 };
@@ -45,7 +45,7 @@ main := fn() void {
     sum := a + b;           // 4.25
     sumx100 := as<i32>(sum * 100.0);  // 425
     lbl1 := "sum(1.5 + 2.75) x100 = ";
-    ext::print(&lbl1, lbl1.size);
+    print(&lbl1, lbl1.size);
     printInt(sumx100); printByte('\n');
 
     // ── 2. Konwersja integer → float, dzielenie ───────────────────────────────
@@ -54,7 +54,7 @@ main := fn() void {
     ratio := as<f64>(x) / as<f64>(y);   // 2.333...
     ratiox100 := as<i32>(ratio * 100.0); // 233
     lbl2 := "ratio(7/3) x100     = ";
-    ext::print(&lbl2, lbl2.size);
+    print(&lbl2, lbl2.size);
     printInt(ratiox100); printByte('\n');
 
     // ── 3. Średnia tablicy integers liczona jako f64 ───────────────────────────
@@ -68,7 +68,7 @@ main := fn() void {
     avg := total / as<f64>(6);    // 35.0
     avgx10 := as<i32>(avg * 10.0); // 350
     lbl3 := "avg([10..60]) x10   = ";
-    ext::print(&lbl3, lbl3.size);
+    print(&lbl3, lbl3.size);
     printInt(avgx10); printByte('\n');
 
     // ── 4. Pi ≈ 3.14159 — użycie literału zmiennoprzecinkowego ───────────────
@@ -76,6 +76,6 @@ main := fn() void {
     area := pi * 1.0 * 1.0;          // circle area for radius=1
     areax100 := as<i32>(area * 100.0); // 314
     lbl4 := "circle_area x100    = ";
-    ext::print(&lbl4, lbl4.size);
+    print(&lbl4, lbl4.size);
     printInt(areax100); printByte('\n');
 };

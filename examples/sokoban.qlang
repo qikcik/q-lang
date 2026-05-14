@@ -18,6 +18,10 @@
 //   char literals   — '#' '@' '$' etc. instead of magic numbers
 //   string concat   — "row1" "row2" ... to build the level layout
 
+print   : fn(ptr<u8>, i32) void = extern!("env.write_utf8");
+printLn : fn(ptr<u8>, i32) void = extern!("env.print_utf8");
+input   : fn(ptr<mut u8>, i32) i32 = extern!("env.input_utf8");
+
 // ── Tile constants ───────────────────────────────────────────────────────────
 //  0 = empty   1 = wall   2 = player   3 = box
 //  4 = goal    5 = box-on-goal          6 = player-on-goal
@@ -81,7 +85,7 @@ State::reset := fn(s: ptr<mut State>) void {
 printByte := fn(b: u8) void {
     ch : array<mut u8, 1> = { 0 };
     ch.[0] = b;
-    ext::print(&ch, 1);
+    print(&ch, 1);
 };
 
 // ── print_board macro ────────────────────────────────────────────────────────
@@ -198,25 +202,25 @@ main := fn() void {
     defer {
         if (won) {
             winMsg := "You solved it!\n";
-            ext::print(&winMsg, winMsg.size);
+            print(&winMsg, winMsg.size);
         } else {
             quitMsg := "Bye!\n";
-            ext::print(&quitMsg, quitMsg.size);
+            print(&quitMsg, quitMsg.size);
         }
         movLbl := "Moves: ";
-        ext::print(&movLbl, movLbl.size);
+        print(&movLbl, movLbl.size);
         printInt(sp.*.moves);
         printByte('\n');
     };
 
     banner := "=== SOKOBAN 8x8 ===";
-    ext::printLn(&banner, banner.size);
+    printLn(&banner, banner.size);
 
     legend := "# wall  @ you  $ box  . goal  * done\n";
-    ext::print(&legend, legend.size);
+    print(&legend, legend.size);
 
     helpMsg := "w/a/s/d = move  r = reset  q = quit\n\n";
-    ext::print(&helpMsg, helpMsg.size);
+    print(&helpMsg, helpMsg.size);
 
     running : mut bool = true;
     while (running) {
@@ -224,15 +228,15 @@ main := fn() void {
         printByte('\n');
 
         movLbl2 := "Moves: ";
-        ext::print(&movLbl2, movLbl2.size);
+        print(&movLbl2, movLbl2.size);
         printInt(sp.*.moves);
         printByte('\n');
 
         promptLbl := "Command: ";
-        ext::print(&promptLbl, promptLbl.size);
+        print(&promptLbl, promptLbl.size);
 
         ibuf : array<mut u8, 4> = { 0, 0, 0, 0 };
-        n := ext::input(&ibuf, 4);
+        n := input(&ibuf, 4);
 
         if (n == 0) {
             running = false;
@@ -245,7 +249,7 @@ main := fn() void {
             else if (cmd == 'r') {
                 State::reset(sp);
                 resetMsg := "Reset!\n";
-                ext::print(&resetMsg, resetMsg.size);
+                print(&resetMsg, resetMsg.size);
             }
             else if (cmd == 'q') { running = false; }
 

@@ -841,13 +841,12 @@ WASM `memarg` koduje `log2(alignment)`:
 - i64/f64 → 3  (8-byte, nie używane w narrow stores)
 
 ### Import section
-- `env.write_utf8(ptr: i32, len: i32) → void` — mapowane na `ext::print` (`$ext__print`); wypisuje bajty bez znaku nowej linii
-- `env.print_utf8(ptr: i32, len: i32) → void` — mapowane na `ext::printLn` (`$ext__printLn`); środowisko dodaje `\n`
-- `env.input_utf8(ptr: i32, maxLen: i32) → i32` — mapowane na `ext::input` (`$ext__input`)
-- Wszystkie trzy importy są zdefiniowane w `compiler/wat-utils.js` jako tablicowy rejestr `BUILTINS`
-- Importy mają niższe indeksy niż funkcje użytkownika (WASM spec)
-- Funkcje użytkownika: indeksy `BUILTINS.length..` (aktualnie od 3)
-- Namespace `ext` jest zarezerwowany — kod użytkownika nie może go deklarować ani rozszerzać
+- Importy WASM są deklarowane w kodzie użytkownika składnią `extern!`: `name : fn(...) T = extern!("mod.field");`
+- `collectAllImportDecls(ast)` w `compiler/wat-encoder.js` zbiera wszystkie `VarDecl._isRuntimeImport` i `NamespacedDecl.inner._isRuntimeImport` z top-level `ast.body`
+- Importy mają niższe indeksy funkcji niż lokalne funkcje użytkownika (wymóg WASM spec)
+- Kolejność indeksów: import 0..N-1, lokalne funkcje N..N+M
+- Brak statycznego rejestru `BUILTINS` — wszystkie importy są user-declared; IDE dostarcza host-functions `env.write_utf8`, `env.print_utf8`, `env.input_utf8` jako standardowe I/O
+- `buildWAT()` zwraca `wasmImports: [{ module, field, mangledName }]` — lista importów dla dynamicznej budowy `importObject` w `wasm-runner.js`
 
 ### Array decay
 `array<T,N>` → `ptr<T>` jest dozwolone w przypisaniu i przekazywaniu argumentów (`isAssignable`).  

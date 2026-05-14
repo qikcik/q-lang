@@ -73,6 +73,11 @@ export class Parser extends ParserExprs {
   // ── declaration ───────────────────────────────────────────────────────────
 
   parseDecl() {
+    // bare file import: import "file.qlang";  →  NamespaceImport { alias: null, filename }
+    if (this.check(TT.KEYWORD, 'import')) {
+      return this._parseBareImportDecl();
+    }
+
     const name = this.eat(TT.IDENT);
 
     // ── namespaced declaration: A::B::C := fn/var ────────────────────────
@@ -86,6 +91,11 @@ export class Parser extends ParserExprs {
       // 'namespace' → namespace declaration
       if (this.check(TT.KEYWORD, 'namespace')) {
         return this.parseNamespaceDeclBody(name);
+      }
+
+      // 'import' → aliased file import: m := import "file.qlang";
+      if (this.check(TT.KEYWORD, 'import')) {
+        return this._parseAliasedImportDecl(name);
       }
 
       // 'fn' → function declaration
@@ -120,6 +130,30 @@ export class Parser extends ParserExprs {
     }
 
     this.error(`Expected ':=' or ':' after identifier '${name.value}'`);
+  }
+
+  // ── file import declarations ───────────────────────────────────────────────
+  // import "file.qlang";            →  NamespaceImport { alias: null, filename }
+  // m := import "file.qlang";       →  NamespaceImport { alias: 'm', filename }
+
+  _parseBareImportDecl() {
+    const kw      = this.eat(TT.KEYWORD, 'import');
+    const fileTok = this.eat(TT.STRING_LIT);
+    const semi    = this.eat(TT.OP, ';');
+    return node('NamespaceImport', {
+      alias: null, filename: fileTok.value,
+      line: kw.line, start: kw.start, end: semi.end,
+    });
+  }
+
+  _parseAliasedImportDecl(nameTok) {
+    this.eat(TT.KEYWORD, 'import');
+    const fileTok = this.eat(TT.STRING_LIT);
+    const semi    = this.eat(TT.OP, ';');
+    return node('NamespaceImport', {
+      alias: nameTok.value, filename: fileTok.value,
+      line: nameTok.line, start: nameTok.start, end: semi.end,
+    });
   }
 
   // ── function declaration ───────────────────────────────────────────────────
@@ -255,15 +289,6 @@ export class Parser extends ParserExprs {
 
   parseNamespaceDeclBody(nameTok) {
     this.eat(TT.KEYWORD, 'namespace');
-    // name := namespace "filename";  →  NamespaceImport
-    if (this.check(TT.STRING_LIT)) {
-      const fileTok = this.eat(TT.STRING_LIT);
-      const semi    = this.eat(TT.OP, ';');
-      return node('NamespaceImport', {
-        alias: nameTok.value, filename: fileTok.value,
-        line: nameTok.line, start: nameTok.start, end: semi.end,
-      });
-    }
     let target = null;
     if (this.check(TT.IDENT)) {
       target = [this.eat(TT.IDENT).value];

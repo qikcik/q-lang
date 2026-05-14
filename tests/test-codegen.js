@@ -392,3 +392,50 @@ test('void function with bare return; compiles', () => {
   const bytes = compileAndGenerate(src);
   assert(bytes.length > 8);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// extern! — runtime import codegen
+// ─────────────────────────────────────────────────────────────────────────────
+
+suite('CodeGen — extern! runtime imports');
+
+test('extern! declaration returns wasmImports from generate()', () => {
+  const { ast } = compile('p : fn(ptr<u8>, i32) void = extern!("env.write_utf8"); main := fn() void {};');
+  const { wasmImports } = generate(ast);
+  assert(Array.isArray(wasmImports), 'wasmImports is an array');
+  assertEq(wasmImports.length, 1);
+  assertEq(wasmImports[0].module,      'env');
+  assertEq(wasmImports[0].field,       'write_utf8');
+  assertEq(wasmImports[0].mangledName, 'p');
+});
+
+test('extern! funcIndex: import at index 0, local func at index 1', () => {
+  const src = 'p : fn(ptr<u8>, i32) void = extern!("env.write_utf8"); main := fn() void { buf : array<u8, 1> = {0}; p(&buf, 1); };';
+  const { ast } = compile(src);
+  const { wasmImports, bytes } = generate(ast);
+  assertEq(wasmImports.length, 1, 'exactly 1 import');
+  assert(bytes instanceof Uint8Array && bytes.length > 8, 'WASM emitted');
+  assert(bytes[0] === 0x00 && bytes[1] === 0x61, 'WASM magic');
+});
+
+test('no extern! declarations → wasmImports is empty array', () => {
+  const { ast } = compile('main := fn() i32 { return 0; };');
+  const { wasmImports } = generate(ast);
+  assert(Array.isArray(wasmImports), 'wasmImports is an array');
+  assertEq(wasmImports.length, 0);
+});
+
+test('extern! WASM can be instantiated with matching host function', async () => {
+  const src = 'p : fn(ptr<u8>, i32) void = extern!("env.write_utf8"); main := fn() void { buf : array<u8, 1> = {0}; p(&buf, 1); };';
+  const { ast } = compile(src);
+  const { bytes, wasmImports } = generate(ast);
+  const importObject = {};
+  for (const { module, field } of wasmImports) {
+    importObject[module] ??= {};
+    importObject[module][field] = () => {};
+  }
+  const { instance } = await WebAssembly.instantiate(bytes, importObject);
+  assert(typeof instance.exports.main === 'function', 'main exported');
+  instance.exports.main(); // should not throw
+});
+

@@ -35,9 +35,8 @@ test("char literal 'A' → u8", () => {
 test("char literal compiles to valid WASM", () => {
   const src = `
     printByte := fn(b: u8) void {
-      ch : array<mut u8, 1> = { 0 };
-      ch.[0] = b;
-      ext::print(&ch, 1);
+      _ch : array<mut u8, 1> = { 0 };
+      _ch.[0] = b;
     };
     main := fn() void { printByte('#'); printByte('\\n'); };
   `;
@@ -323,79 +322,94 @@ test('StructField with struct type preserves _typeAnnotStart/End', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ext namespace
+// extern! — runtime import declarations
 // ─────────────────────────────────────────────────────────────────────────────
 
-suite('TypeChecker — ext namespace');
+suite('Parser — RuntimeImportExpr');
 
-test('ext::print call type-checks (void return)', () => {
+test('extern!("env.write_utf8") parses as RuntimeImportExpr', () => {
+  const { ast } = compile('f : fn(ptr<u8>, i32) void = extern!("env.write_utf8"); main := fn() void {};');
+  const decl = ast.body[0];
+  assertEq(decl.kind, 'VarDecl');
+  assertEq(decl.value.kind, 'RuntimeImportExpr');
+  assertEq(decl.value.module, 'env');
+  assertEq(decl.value.field,  'write_utf8');
+});
+
+test('extern! splits on last dot (module may contain dots)', () => {
+  const { ast } = compile('f : fn(i32) void = extern!("a.b.c"); main := fn() void {};');
+  assertEq(ast.body[0].value.module, 'a.b');
+  assertEq(ast.body[0].value.field,  'c');
+});
+
+test('extern! without dot → ParseError', () => {
+  const { parseErrors } = liveCompile('f : fn(i32) void = extern!("nodot");');
+  assert(parseErrors.length > 0, 'should produce a parse error');
+});
+
+suite('TypeChecker — extern! declarations');
+
+test('extern! declaration registers function in scope', () => {
   const { ast } = compile(
-    'main := fn() void { buf : array<u8, 5> = "hello"; ext::print(&buf, 5); };'
+    'print : fn(ptr<u8>, i32) void = extern!("env.write_utf8");\n' +
+    'main := fn() void { buf : array<u8, 1> = {0}; print(&buf, 1); };'
+  );
+  assert(ast != null, 'compiled without error');
+});
+
+test('extern! call typechecks — void return', () => {
+  const { ast } = compile(
+    'p : fn(ptr<u8>, i32) void = extern!("env.write_utf8");\n' +
+    'main := fn() void { buf : array<u8, 5> = "hello"; p(&buf, 5); };'
+  );
+  const mainFn = ast.body.find(d => d.kind === 'FuncDecl');
+  const call = mainFn.body.body[1].expr;
+  assertEq(call._type?.name, 'void');
+});
+
+test('extern! call typechecks — i32 return', () => {
+  const { ast } = compile(
+    'inp : fn(ptr<mut u8>, i32) i32 = extern!("env.input_utf8");\n' +
+    'main := fn() i32 { buf : array<mut u8, 8> = {0,0,0,0,0,0,0,0}; return inp(&buf, 8); };'
   );
   assert(ast != null, 'should compile');
 });
 
-test('ext::printLn call type-checks (void return)', () => {
-  const { ast } = compile(
-    'main := fn() void { buf : array<u8, 5> = "hello"; ext::printLn(&buf, 5); };'
-  );
-  assert(ast != null, 'should compile');
-});
-
-test('ext::input call type-checks (u32 return)', () => {
-  const { ast } = compile(
-    'main := fn() void { buf : array<mut u8, 8> = {0,0,0,0,0,0,0,0}; n := ext::input(&buf, 8); ext::printLn(&buf, n); };'
-  );
-  assert(ast != null, 'should compile');
-});
-
-test('ext::print return type is void', () => {
-  const { ast } = compile(
-    'main := fn() void { buf : array<u8, 5> = "hello"; ext::print(&buf, 5); };'
-  );
-  const mainFn = ast.body[0];
-  const exprStmt = mainFn.body.body[1];
-  assertEq(exprStmt.expr._type?.name, 'void');
-});
-
-test('ext::printLn return type is void', () => {
-  const { ast } = compile(
-    'main := fn() void { buf : array<u8, 5> = "hello"; ext::printLn(&buf, 5); };'
-  );
-  const mainFn = ast.body[0];
-  const exprStmt = mainFn.body.body[1];
-  assertEq(exprStmt.expr._type?.name, 'void');
-});
-
-test('ext::input return type is u32', () => {
-  const { ast } = compile(
-    'main := fn() void { buf : array<mut u8, 4> = {0,0,0,0}; n := ext::input(&buf, 4); };'
-  );
-  const mainFn = ast.body[0];
-  const nDecl = mainFn.body.body[1];
-  assertEq(nDecl._type.name, 'u32');
-});
-
-test('ext namespace declaration by user → TypeError', () => {
+test('extern! without type annotation → TypeError', () => {
   assertThrows(
-    () => compile('ext := namespace;'),
+    () => compile('f := extern!("env.foo");'),
     TypeError,
-    "'ext' is a reserved namespace",
+    'type annotation',
   );
 });
 
-test('ext::foo user-defined function → TypeError', () => {
+test('extern! duplicate declaration → TypeError', () => {
   assertThrows(
-    () => compile('ext := namespace; ext::foo := fn() void {};'),
+    () => compile('f : fn(i32) void = extern!("env.foo"); g : fn(i32) void = extern!("env.foo");'),
     TypeError,
-    "'ext' is a reserved namespace",
+    'Duplicate extern!',
   );
 });
 
-test('ext:: namespace function visible in liveCompile', () => {
+test('extern! address-of → TypeError', () => {
+  assertThrows(
+    () => compile('f : fn(i32) void = extern!("env.foo"); main := fn() void { x := &f; };'),
+    TypeError,
+    'Cannot take address',
+  );
+});
+
+test('liveCompile: extern! declaration → 0 type errors', () => {
   const { typeErrors } = liveCompile(
-    'main := fn() void { buf : array<u8, 5> = "hello"; ext::print(&buf, 5); };'
+    'print : fn(ptr<u8>, i32) void = extern!("env.write_utf8");\n' +
+    'main := fn() void { buf : array<u8, 5> = "hello"; print(&buf, 5); };'
   );
   assertEq(typeErrors.length, 0, 'no type errors expected');
 });
+
+test('liveCompile: extern! without annotation → 1 type error collected', () => {
+  const { typeErrors } = liveCompile('f := extern!("env.foo");');
+  assert(typeErrors.length > 0, 'should collect type error');
+});
+
 

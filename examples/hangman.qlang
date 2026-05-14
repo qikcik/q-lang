@@ -5,10 +5,14 @@
 // Małe litery są automatycznie zamieniane na wielkie.
 
 // printByte — wypisuje pojedynczy bajt
+
+print : fn(ptr<u8>, i32) void = extern!("env.write_utf8");
+input : fn(ptr<mut u8>, i32) i32 = extern!("env.input_utf8");
+
 printByte := fn(b: u8) void {
     ch : array<mut u8, 1> = { 0 };
     ch.[0] = b;
-    ext::print(&ch, 1);
+    print(&ch, 1);
 };
 
 main := fn() void {
@@ -18,13 +22,13 @@ main := fn() void {
     lives : mut i32 = 6;
 
     hello : array<u8, 16> = "=== HANGMAN ===\n";
-    ext::print(&hello, hello.size);
+    print(&hello, hello.size);
 
     running : mut bool = true;
     while (running) {
 
         livesLbl : array<u8, 7> = "Lives: ";
-        ext::print(&livesLbl, livesLbl.size);
+        print(&livesLbl, livesLbl.size);
         printByte(as<u8>(48 + lives));
         printByte('\n');
 
@@ -42,11 +46,11 @@ main := fn() void {
         printByte('\n');
 
         guessLbl : array<u8, 7> = "Guess: ";
-        ext::print(&guessLbl, guessLbl.size);
+        print(&guessLbl, guessLbl.size);
 
         // Wczytaj literę od użytkownika
         ibuf : array<mut u8, 4> = { 0, 0, 0, 0 };
-        n := ext::input(&ibuf, 4);
+        n := input(&ibuf, 4);
 
         if (n == 0) {
             running = false;
@@ -72,7 +76,7 @@ main := fn() void {
             if (!hit) {
                 lives = lives - 1;
                 wrongMsg : array<u8, 7> = "Wrong!\n";
-                ext::print(&wrongMsg, wrongMsg.size);
+                print(&wrongMsg, wrongMsg.size);
             }
 
             // Sprawdź wygraną
@@ -93,9 +97,9 @@ main := fn() void {
 
     if (lives > 0) {
         winMsg : array<u8, 28> = "You win! The word was QLANG\n";
-        ext::print(&winMsg, winMsg.size);
+        print(&winMsg, winMsg.size);
     } else {
         loseMsg : array<u8, 30> = "Game over! The word was QLANG\n";
-        ext::print(&loseMsg, loseMsg.size);
+        print(&loseMsg, loseMsg.size);
     }
 };

@@ -8,7 +8,7 @@ export const TT = Object.freeze({
   BOOL_LIT:    'BOOL_LIT',   // true | false
   STRING_LIT:  'STRING_LIT', // "hello" — raw UTF-8 string
   CHAR_LIT:    'CHAR_LIT',   // 'x'  — single ASCII character; value = numeric code as string
-  KEYWORD:     'KEYWORD',    // return as if else while break fn mut ptr array macro namespace
+  KEYWORD:     'KEYWORD',    // return as if else while break fn mut ptr array macro namespace import extern
   OP:          'OP',         // := :: : = + - * / & < > , ; ! | && || == != <= >=
   PUNCT:       'PUNCT',      // ( ) { } [ ] .
   MACRO_VAR:        'MACRO_VAR',        // $name — gensym variable inside macro body
@@ -23,7 +23,7 @@ export const SCALAR_TYPES = new Set([
   'i8', 'u8', 'i16', 'u16', 'i32', 'u32', 'i64', 'u64', 'f32', 'f64', 'bool',
 ]);
 
-const KEYWORDS = new Set(['return', 'as', 'if', 'else', 'while', 'break', 'mut', 'ptr', 'array', 'fn', 'macro', 'void', 'defer', 'struct', 'namespace']);
+const KEYWORDS = new Set(['return', 'as', 'if', 'else', 'while', 'break', 'mut', 'ptr', 'array', 'fn', 'macro', 'void', 'defer', 'struct', 'namespace', 'import', 'extern']);
 
 /**
  * @typedef {{ type: string, value: string, line: number, col: number, start: number, end: number }} Token

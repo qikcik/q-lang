@@ -165,6 +165,8 @@ export class TypeInferBase {
 
     if (expr.op === '&') {
       const t = this.inferExpr(expr.operand);
+      if (t?._isRuntimeImport === true)
+        throw new TypeError(`Cannot take address of runtime-imported function '${expr.operand.name}'`, expr);
       const inner = isArray(t) ? { ...t.elemType, mut: false } : { ...t, mut: false };
       const ptrType = { kind: 'PtrType', inner, mut: false };
       expr._type = ptrType;

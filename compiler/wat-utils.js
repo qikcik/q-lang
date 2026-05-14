@@ -44,14 +44,7 @@ export class BumpAllocator {
 }
 
 // ── Built-in imports ──────────────────────────────────────────────────────────
-// Each entry maps a mangled QLang name (ext__X) to a WASM import (wasmModule.wasmField).
-// The 'name' field is the WASM function name used inside the module ($ext__printLn etc.).
-
-export const BUILTINS = [
-  { name: 'ext__print',   wasmModule: 'env', wasmField: 'write_utf8',  params: ['i32','i32'], result: 'void' },
-  { name: 'ext__printLn', wasmModule: 'env', wasmField: 'print_utf8',  params: ['i32','i32'], result: 'void' },
-  { name: 'ext__input',   wasmModule: 'env', wasmField: 'input_utf8',  params: ['i32','i32'], result: 'i32'  },
-];
+// (Removed: static BUILTINS array replaced by dynamic extern! declarations)
 
 // ── SExprBuilder ──────────────────────────────────────────────────────────────
 // Builds a WatIR S-expr tree (nested arrays) and accumulates SSpans.

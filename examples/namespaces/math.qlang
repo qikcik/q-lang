@@ -1,6 +1,6 @@
 // math.qlang — Vec2 math library
 //
-// Import via:  m := namespace "math.qlang";
+// Import via:  m := import "math.qlang";
 // Access:      m::Vec2::of(3, 4)       — struct constructor
 //              m::Vec2::dot(a, b)      — 3-segment qualified name
 //              m::Vec2::len_sq(v)      — intra-file cross-method call

@@ -12,7 +12,7 @@
 //   wat-serializer.js  — watToText (S-expr → WAT text + TextSpan[])
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { SExprBuilder, BUILTINS, canonType, HEAP_BASE } from './wat-utils.js';
+import { SExprBuilder, canonType, HEAP_BASE } from './wat-utils.js';
 import { emitFunc }                                     from './wat-emitter.js';
 export { watToText }                                    from './wat-serializer.js';
 
@@ -30,18 +30,32 @@ function collectAllFuncDecls(ast) {
   return result;
 }
 
+// Collect all VarDecls tagged _isRuntimeImport (top-level + inside NamespacedDecl)
+function collectAllImportDecls(ast) {
+  const result = [];
+  for (const decl of ast.body) {
+    if (decl.kind === 'VarDecl' && decl._isRuntimeImport) {
+      result.push(decl);
+    } else if (decl.kind === 'NamespacedDecl' && decl.inner?._isRuntimeImport) {
+      result.push(decl.inner);
+    }
+  }
+  return result;
+}
+
 // ── buildWAT — Typed AST → S-expr tree ───────────────────────────────────────
 
 export function buildWAT(ast, { debug = false } = {}) {
-  const b           = new SExprBuilder();
-  const funcs       = collectAllFuncDecls(ast);
-  const importCount = BUILTINS.length + (debug ? 1 : 0);
-  const stmtMap     = new Map();
-  let   stmtCounter = 0;
+  const b            = new SExprBuilder();
+  const funcs        = collectAllFuncDecls(ast);
+  const importDecls  = collectAllImportDecls(ast);
+  const importCount  = importDecls.length + (debug ? 1 : 0);
+  const stmtMap      = new Map();
+  let   stmtCounter  = 0;
 
   const funcIndex = new Map();
-  BUILTINS.forEach((bi, i) => funcIndex.set(bi.name, i));
-  funcs.forEach((f, i)     => funcIndex.set(f.name, importCount + i));
+  importDecls.forEach((d, i) => funcIndex.set(d._type._mangledName, i));
+  funcs.forEach((f, i)       => funcIndex.set(f.name, importCount + i));
 
   const signatures = [];
   const sigIndex   = new Map();
@@ -50,7 +64,10 @@ export function buildWAT(ast, { debug = false } = {}) {
     if (!sigIndex.has(key)) { sigIndex.set(key, signatures.length); signatures.push({ params, result }); }
     return sigIndex.get(key);
   }
-  BUILTINS.forEach(bi => getSig(bi.params, bi.result));
+  importDecls.forEach(d => getSig(
+    d._type.paramTypes.map(p => canonType(p)),
+    canonType(d._type.returnType),
+  ));
   if (debug) getSig(['i32'], 'void');
   funcs.forEach(f => getSig(f.params.map(p => canonType(p.typeAnnot)), canonType(f.returnType)));
 
@@ -64,11 +81,13 @@ export function buildWAT(ast, { debug = false } = {}) {
   });
 
   // ── imports ────────────────────────────────────────────────────────────────
-  BUILTINS.forEach(bi => {
-    b.push(['import', bi.wasmModule, bi.wasmField, [
-      'func', `$${bi.name}`,
-      ...bi.params.map(p => ['param', p]),
-      ['result', bi.result],
+  importDecls.forEach(d => {
+    const params = d._type.paramTypes.map(p => canonType(p));
+    const result = canonType(d._type.returnType);
+    b.push(['import', d._type._wasmModule, d._type._wasmField, [
+      'func', `$${d._type._mangledName}`,
+      ...params.map(p => ['param', p]),
+      ...(result !== 'void' ? [['result', result]] : []),
     ]]);
   });
   if (debug) {
@@ -94,5 +113,10 @@ export function buildWAT(ast, { debug = false } = {}) {
   funcs.forEach(f => emitFunc(b, f, funcIndex, sigIndex, importCount, dbgCtx));
 
   closeModule();
-  return { module: b.root, sSpans: b.sSpans, stmtMap };
+  const wasmImports = importDecls.map(d => ({
+    module:      d._type._wasmModule,
+    field:       d._type._wasmField,
+    mangledName: d._type._mangledName,
+  }));
+  return { module: b.root, sSpans: b.sSpans, stmtMap, wasmImports };
 }

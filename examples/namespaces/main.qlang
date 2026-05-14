@@ -1,7 +1,7 @@
 // main.qlang — Namespace import demo: structs across files
 //
 // Demonstrates:
-//   m := namespace "math.qlang"         — file import alias
+//   m := import "math.qlang"          — file import alias
 //   m::Vec2::of(x, y)                   — struct constructor (type inferred)
 //   b : m::Vec2 = m::Vec2::of(x, y)     — explicit qualified type annotation
 //   getX := fn(v: m::Vec2) i32 { ... }  — imported type in fn parameter
@@ -13,7 +13,7 @@
 //   main() = 47
 //   (getX(a)=3, dot(a,b)=11, len_sq(a)=25, manhattan(a,b)=8)
 
-m := namespace "math.qlang";
+m := import "math.qlang";
 
 // getX demonstrates m::Vec2 as a function parameter type
 getX := fn(v: m::Vec2) i32 {

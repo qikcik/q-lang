@@ -460,20 +460,27 @@ test('hover on triple-nested chain a.b.c.d resolves correctly', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PARSER — NamespaceImport  (x := namespace "file.qlang")
+// PARSER — NamespaceImport  (m := import "file.qlang" | import "file.qlang")
 // ─────────────────────────────────────────────────────────────────────────────
 
 suite('Parser — NamespaceImport');
 
-test('x := namespace "utils.qlang" → NamespaceImport node', () => {
-  const ast = parse(tokenize('x := namespace "utils.qlang";'));
+test('x := import "utils.qlang" → NamespaceImport node (aliased)', () => {
+  const ast = parse(tokenize('x := import "utils.qlang";'));
   assertEq(ast.body[0].kind, 'NamespaceImport');
   assertEq(ast.body[0].alias, 'x');
   assertEq(ast.body[0].filename, 'utils.qlang');
 });
 
-test('NamespaceImport has line/start/end positions', () => {
-  const ast = parse(tokenize('ext := namespace "math.qlang";'));
+test('import "utils.qlang" bare → NamespaceImport node (wildcard, alias null)', () => {
+  const ast = parse(tokenize('import "utils.qlang";'));
+  assertEq(ast.body[0].kind, 'NamespaceImport');
+  assertEq(ast.body[0].alias, null);
+  assertEq(ast.body[0].filename, 'utils.qlang');
+});
+
+test('NamespaceImport aliased has line/start/end positions', () => {
+  const ast = parse(tokenize('ext := import "math.qlang";'));
   const node = ast.body[0];
   assertEq(node.kind, 'NamespaceImport');
   assert(node.line != null);
@@ -526,7 +533,7 @@ function makeGetFile(files) { return name => files[name] ?? null; }
 
 test('compileMulti produces merged AST with imported FuncDecls', () => {
   const utils = 'add := fn(a: i32, b: i32) i32 { return a + b; };';
-  const main  = 'u := namespace "utils.qlang"; main := fn() i32 { return u::add(2, 3); };';
+  const main  = 'u := import "utils.qlang"; main := fn() i32 { return u::add(2, 3); };';
   const { ast } = compileMulti(main, makeGetFile({ 'utils.qlang': utils }));
   // merged body must include both the imported FuncDecl and main
   const funcNames = ast.body.filter(d => d.kind === 'FuncDecl').map(d => d.name);
@@ -536,7 +543,7 @@ test('compileMulti produces merged AST with imported FuncDecls', () => {
 
 test('compileMulti — imported FuncDecl name mangled with file prefix', () => {
   const utils = 'add := fn(a: i32, b: i32) i32 { return a + b; };';
-  const main  = 'u := namespace "utils.qlang"; main := fn() i32 { return u::add(1, 1); };';
+  const main  = 'u := import "utils.qlang"; main := fn() i32 { return u::add(1, 1); };';
   const { ast } = compileMulti(main, makeGetFile({ 'utils.qlang': utils }));
   const importedAdd = ast.body.find(d => d.kind === 'FuncDecl' && d.name === '__f_utils_qlang__add');
   assert(importedAdd != null, 'mangled imported function should exist in merged AST');
@@ -544,7 +551,7 @@ test('compileMulti — imported FuncDecl name mangled with file prefix', () => {
 
 test('compileMulti — basic call executes correctly', async () => {
   const utils = 'add := fn(a: i32, b: i32) i32 { return a + b; };';
-  const main  = 'u := namespace "utils.qlang"; main := fn() i32 { return u::add(2, 3); };';
+  const main  = 'u := import "utils.qlang"; main := fn() i32 { return u::add(2, 3); };';
   const { ast } = compileMulti(main, makeGetFile({ 'utils.qlang': utils }));
   const { bytes } = generate(ast);
   const { instance } = await WebAssembly.instantiate(bytes, WASM_ENV);
@@ -557,7 +564,7 @@ test('compileMulti — intra-file call from imported function', async () => {
     'add := fn(a: i32, b: i32) i32 { return a + b; };',
     'double := fn(x: i32) i32 { return add(x, x); };',
   ].join('\n');
-  const main = 'u := namespace "utils.qlang"; main := fn() i32 { return u::double(7); };';
+  const main = 'u := import "utils.qlang"; main := fn() i32 { return u::double(7); };';
   const { ast } = compileMulti(main, makeGetFile({ 'utils.qlang': utils }));
   const { bytes } = generate(ast);
   const { instance } = await WebAssembly.instantiate(bytes, WASM_ENV);
@@ -569,7 +576,7 @@ test('compileMulti — multiple functions from same import', async () => {
     'add := fn(a: i32, b: i32) i32 { return a + b; };',
     'mul := fn(a: i32, b: i32) i32 { return a * b; };',
   ].join('\n');
-  const main = 'u := namespace "utils.qlang"; main := fn() i32 { return u::add(u::mul(2, 3), 4); };';
+  const main = 'u := import "utils.qlang"; main := fn() i32 { return u::add(u::mul(2, 3), 4); };';
   const { ast } = compileMulti(main, makeGetFile({ 'utils.qlang': utils }));
   const { bytes } = generate(ast);
   const { instance } = await WebAssembly.instantiate(bytes, WASM_ENV);
@@ -583,7 +590,7 @@ test('compileMulti — multiple functions from same import', async () => {
 suite('compileMulti — error cases');
 
 test('missing file throws with filename in message', () => {
-  const main = 'u := namespace "missing.qlang"; main := fn() i32 { return 0; };';
+  const main = 'u := import "missing.qlang"; main := fn() i32 { return 0; };';
   assertThrows(
     () => compileMulti(main, makeGetFile({})),
     Error,
@@ -594,10 +601,10 @@ test('missing file throws with filename in message', () => {
 test('circular import throws', () => {
   // a.qlang imports b.qlang which imports a.qlang
   const files = {
-    'a.qlang': 'b := namespace "b.qlang"; foo := fn() i32 { return 1; };',
-    'b.qlang': 'a := namespace "a.qlang"; bar := fn() i32 { return 2; };',
+    'a.qlang': 'b := import "b.qlang"; foo := fn() i32 { return 1; };',
+    'b.qlang': 'a := import "a.qlang"; bar := fn() i32 { return 2; };',
   };
-  const main = 'a := namespace "a.qlang"; main := fn() i32 { return 0; };';
+  const main = 'a := import "a.qlang"; main := fn() i32 { return 0; };';
   assertThrows(
     () => compileMulti(main, makeGetFile(files)),
     Error,
@@ -606,7 +613,7 @@ test('circular import throws', () => {
 });
 
 test('parse error in main causes early return with parseErrors', () => {
-  const main = 'u := namespace "utils.qlang"; main := fn( { return 0; };'; // bad syntax
+  const main = 'u := import "utils.qlang"; main := fn( { return 0; };'; // bad syntax
   const { parseErrors } = compileMulti(main, makeGetFile({}));
   assert(parseErrors.length > 0, 'should report parse errors');
 });
@@ -619,7 +626,7 @@ suite('liveCompile — NamespaceImport');
 
 test('liveCompile: NamespaceImport with no importEnv produces type error (not a crash)', () => {
   // liveCompile has no getFile — import resolve silently skipped; accessing alias member errors
-  const src = 'u := namespace "utils.qlang"; main := fn() i32 { return u::add(1, 2); };';
+  const src = 'u := import "utils.qlang"; main := fn() i32 { return u::add(1, 2); };';
   let threw = false;
   let result;
   try { result = liveCompile(src); } catch { threw = true; }
@@ -627,7 +634,7 @@ test('liveCompile: NamespaceImport with no importEnv produces type error (not a 
 });
 
 test('liveCompile: NamespaceImport node alone produces 0 crashes', () => {
-  const src = 'u := namespace "utils.qlang";';
+  const src = 'u := import "utils.qlang";';
   let threw = false;
   try { liveCompile(src); } catch { threw = true; }
   assert(!threw, 'liveCompile must never throw on bare NamespaceImport');
@@ -640,13 +647,13 @@ suite('liveCompileMulti — live multi-file type checking');
 
 test('liveCompileMulti: 0 type errors when import resolves', () => {
   const utils = 'add := fn(a: i32, b: i32) i32 { return a + b; };';
-  const main  = 'u := namespace "utils.qlang"; main := fn() i32 { return u::add(1, 2); };';
+  const main  = 'u := import "utils.qlang"; main := fn() i32 { return u::add(1, 2); };';
   const { typeErrors } = liveCompileMulti(main, name => name === 'utils.qlang' ? utils : null);
   assertEq(typeErrors.length, 0);
 });
 
 test('liveCompileMulti: type error when import missing (not crash)', () => {
-  const main = 'u := namespace "missing.qlang"; main := fn() i32 { return u::add(1, 2); };';
+  const main = 'u := import "missing.qlang"; main := fn() i32 { return u::add(1, 2); };';
   let threw = false;
   let result;
   try { result = liveCompileMulti(main, () => null); } catch { threw = true; }
@@ -659,7 +666,7 @@ test('liveCompileMulti: intra-file call among imported functions — 0 errors', 
     'add := fn(a: i32, b: i32) i32 { return a + b; };',
     'double := fn(x: i32) i32 { return add(x, x); };',
   ].join('\n');
-  const main = 'u := namespace "utils.qlang"; main := fn() i32 { return u::double(3); };';
+  const main = 'u := import "utils.qlang"; main := fn() i32 { return u::double(3); };';
   const { typeErrors } = liveCompileMulti(main, name => name === 'utils.qlang' ? utils : null);
   assertEq(typeErrors.length, 0);
 });
@@ -725,7 +732,7 @@ const _mathSrc = 'Vec2 := struct { x: i32; y: i32; };';
 
 test('liveCompileMulti: x : m::Vec2 = m::Vec2::of(1,2) — 0 type errors', () => {
   const main = [
-    'm := namespace "math.qlang";',
+    'm := import "math.qlang";',
     'main := fn() i32 { x : m::Vec2 = m::Vec2::of(1, 2); return x.x; };',
   ].join('\n');
   const { typeErrors } = liveCompileMulti(main, makeGetFile({ 'math.qlang': _mathSrc }));
@@ -734,7 +741,7 @@ test('liveCompileMulti: x : m::Vec2 = m::Vec2::of(1,2) — 0 type errors', () =>
 
 test('liveCompileMulti: fn param v: m::Vec2 — 0 type errors', () => {
   const main = [
-    'm := namespace "math.qlang";',
+    'm := import "math.qlang";',
     'getX := fn(v: m::Vec2) i32 { return v.x; };',
     'main := fn() i32 { p : m::Vec2 = m::Vec2::of(7, 8); return getX(p); };',
   ].join('\n');
@@ -744,7 +751,7 @@ test('liveCompileMulti: fn param v: m::Vec2 — 0 type errors', () => {
 
 test('liveCompileMulti: struct field pos: m::Vec2 — 0 type errors', () => {
   const main = [
-    'm := namespace "math.qlang";',
+    'm := import "math.qlang";',
     'Entity := struct { id: i32; pos: m::Vec2; };',
     'main := fn() i32 { e := Entity::of(1, m::Vec2::of(3, 4)); return e.id; };',
   ].join('\n');
@@ -754,7 +761,7 @@ test('liveCompileMulti: struct field pos: m::Vec2 — 0 type errors', () => {
 
 test('liveCompileMulti: x : m::Vec2 = 5 — type mismatch is reported (not crash)', () => {
   const main = [
-    'm := namespace "math.qlang";',
+    'm := import "math.qlang";',
     'main := fn() i32 { x : m::Vec2 = 5; return 0; };',
   ].join('\n');
   let threw = false;
@@ -766,7 +773,7 @@ test('liveCompileMulti: x : m::Vec2 = 5 — type mismatch is reported (not crash
 
 test('liveCompileMulti: x : m::Unknown — unknown qualified type is reported (not crash)', () => {
   const main = [
-    'm := namespace "math.qlang";',
+    'm := import "math.qlang";',
     'main := fn() i32 { x : m::Unknown = m::Vec2::of(1, 2); return 0; };',
   ].join('\n');
   let threw = false;
@@ -778,7 +785,7 @@ test('liveCompileMulti: x : m::Unknown — unknown qualified type is reported (n
 
 test('compileMulti + generate: x : m::Vec2 = m::Vec2::of(2,3) — WASM returns x.x = 2', async () => {
   const main = [
-    'm := namespace "math.qlang";',
+    'm := import "math.qlang";',
     'main := fn() i32 { x : m::Vec2 = m::Vec2::of(2, 3); return x.x; };',
   ].join('\n');
   const { ast } = compileMulti(main, makeGetFile({ 'math.qlang': _mathSrc }));
@@ -807,10 +814,10 @@ suite('Circular imports — liveCompileMulti safety');
 
 test('direct circular (a→b→a): liveCompileMulti never throws', () => {
   const files = {
-    'a.qlang': 'b := namespace "b.qlang"; foo := fn() i32 { return 1; };',
-    'b.qlang': 'a := namespace "a.qlang"; bar := fn() i32 { return 2; };',
+    'a.qlang': 'b := import "b.qlang"; foo := fn() i32 { return 1; };',
+    'b.qlang': 'a := import "a.qlang"; bar := fn() i32 { return 2; };',
   };
-  const main = 'a := namespace "a.qlang"; main := fn() i32 { return 0; };';
+  const main = 'a := import "a.qlang"; main := fn() i32 { return 0; };';
   let threw = false;
   try { liveCompileMulti(main, makeGetFile(files)); } catch { threw = true; }
   assert(!threw, 'liveCompileMulti must not throw on circular imports');
@@ -818,18 +825,18 @@ test('direct circular (a→b→a): liveCompileMulti never throws', () => {
 
 test('direct circular: result has typeErrors array (valid shape)', () => {
   const files = {
-    'a.qlang': 'b := namespace "b.qlang"; foo := fn() i32 { return 1; };',
-    'b.qlang': 'a := namespace "a.qlang"; bar := fn() i32 { return 2; };',
+    'a.qlang': 'b := import "b.qlang"; foo := fn() i32 { return 1; };',
+    'b.qlang': 'a := import "a.qlang"; bar := fn() i32 { return 2; };',
   };
-  const main = 'a := namespace "a.qlang"; main := fn() i32 { return a::foo(); };';
+  const main = 'a := import "a.qlang"; main := fn() i32 { return a::foo(); };';
   const result = liveCompileMulti(main, makeGetFile(files));
   assert(result !== undefined, 'result must be defined');
   assert(Array.isArray(result.typeErrors), 'typeErrors must be an array');
 });
 
 test('self-import (a imports a): liveCompileMulti never throws', () => {
-  const files = { 'a.qlang': 'self := namespace "a.qlang"; foo := fn() i32 { return 1; };' };
-  const main = 'a := namespace "a.qlang"; main := fn() i32 { return 0; };';
+  const files = { 'a.qlang': 'self := import "a.qlang"; foo := fn() i32 { return 1; };' };
+  const main = 'a := import "a.qlang"; main := fn() i32 { return 0; };';
   let threw = false;
   try { liveCompileMulti(main, makeGetFile(files)); } catch { threw = true; }
   assert(!threw, 'self-import must not throw');
@@ -837,11 +844,11 @@ test('self-import (a imports a): liveCompileMulti never throws', () => {
 
 test('transitive circular (a→b→c→a): liveCompileMulti never throws', () => {
   const files = {
-    'a.qlang': 'b := namespace "b.qlang"; fa := fn() i32 { return 1; };',
-    'b.qlang': 'c := namespace "c.qlang"; fb := fn() i32 { return 2; };',
-    'c.qlang': 'a := namespace "a.qlang"; fc := fn() i32 { return 3; };',
+    'a.qlang': 'b := import "b.qlang"; fa := fn() i32 { return 1; };',
+    'b.qlang': 'c := import "c.qlang"; fb := fn() i32 { return 2; };',
+    'c.qlang': 'a := import "a.qlang"; fc := fn() i32 { return 3; };',
   };
-  const main = 'a := namespace "a.qlang"; main := fn() i32 { return 0; };';
+  const main = 'a := import "a.qlang"; main := fn() i32 { return 0; };';
   let threw = false;
   try { liveCompileMulti(main, makeGetFile(files)); } catch { threw = true; }
   assert(!threw, 'transitive circular must not throw');
@@ -849,13 +856,60 @@ test('transitive circular (a→b→c→a): liveCompileMulti never throws', () =>
 
 test('compileMulti: circular import throws with "Circular import" message', () => {
   const files = {
-    'a.qlang': 'b := namespace "b.qlang"; foo := fn() i32 { return 1; };',
-    'b.qlang': 'a := namespace "a.qlang"; bar := fn() i32 { return 2; };',
+    'a.qlang': 'b := import "b.qlang"; foo := fn() i32 { return 1; };',
+    'b.qlang': 'a := import "a.qlang"; bar := fn() i32 { return 2; };',
   };
-  const main = 'a := namespace "a.qlang"; main := fn() i32 { return 0; };';
+  const main = 'a := import "a.qlang"; main := fn() i32 { return 0; };';
   assertThrows(
     () => compileMulti(main, makeGetFile(files)),
     Error,
     'Circular import',
   );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Wildcard import — bare `import "file.qlang"` form
+// ─────────────────────────────────────────────────────────────────────────────
+
+suite('Wildcard import — bare import form');
+
+test('wildcard import: call imported function directly (no alias)', async () => {
+  const utils = 'add := fn(a: i32, b: i32) i32 { return a + b; };';
+  const main  = 'import "utils.qlang"; main := fn() i32 { return add(1, 2); };';
+  const { ast } = compileMulti(main, makeGetFile({ 'utils.qlang': utils }));
+  const { bytes } = generate(ast);
+  const { instance } = await WebAssembly.instantiate(bytes, WASM_ENV);
+  assertEq(instance.exports.main(), 3);
+});
+
+test('wildcard import: liveCompileMulti 0 type errors', () => {
+  const utils = 'add := fn(a: i32, b: i32) i32 { return a + b; };';
+  const main  = 'import "utils.qlang"; main := fn() i32 { return add(1, 2); };';
+  const { typeErrors } = liveCompileMulti(main, makeGetFile({ 'utils.qlang': utils }));
+  assertEq(typeErrors.length, 0);
+});
+
+test('wildcard import: conflict (both files export same name) → error', () => {
+  const a = 'foo := fn() i32 { return 1; };';
+  const b = 'foo := fn() i32 { return 2; };';
+  const main = 'import "a.qlang"; import "b.qlang"; main := fn() i32 { return foo(); };';
+  assertThrows(
+    () => compileMulti(main, makeGetFile({ 'a.qlang': a, 'b.qlang': b })),
+    Error,
+    'conflict',
+  );
+});
+
+test('wildcard and aliased coexist, aliased takes precedence by name', () => {
+  const utils = 'add := fn(a: i32, b: i32) i32 { return a + b; };';
+  const main  = [
+    'import "utils.qlang";',
+    'u := import "utils.qlang";',
+    'main := fn() i32 { return u::add(3, 4); };',
+  ].join('\n');
+  // aliased call works even alongside wildcard
+  const { ast } = compileMulti(main, makeGetFile({ 'utils.qlang': utils }));
+  const { bytes } = generate(ast);
+  // Don't run — just verify it compiles without error
+  assert(bytes.length > 8);
 });

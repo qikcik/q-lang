@@ -13,7 +13,7 @@
 //   else if        — warunkowa aktualizacja min/max
 
 // ── Point ─────────────────────────────────────────────────────────────────────
-
+print : fn(ptr<u8>, i32) void = extern!("env.write_utf8");
 Point := struct {
     x : mut i32;
     y : mut i32;
@@ -61,7 +61,7 @@ Stats::update := fn(s: ptr<mut Stats>, p: Point) void {
 printByte := fn(b: u8) void {
     ch : array<mut u8, 1> = { 0 };
     ch.[0] = b;
-    ext::print(&ch, 1);
+    print(&ch, 1);
 };
 
 printInt := fn(n: i32) void {
@@ -85,7 +85,7 @@ main := fn() void {
     Point::translate(sp1, 3, 4);    // (2+3, 3+4) = (5, 7)
 
     lbl1 := "Point after translate: (";
-    ext::print(&lbl1, lbl1.size);
+    print(&lbl1, lbl1.size);
     printInt(p1.x); printByte(','); printByte(' ');
     printInt(p1.y); printByte(')'); printByte('\n');
 
@@ -95,7 +95,7 @@ main := fn() void {
     Point::set(sp2, 0, 2);
     dsq := Point::distSq(p1, p2);
     lbl2 := "Distance squared p1-p2: ";
-    ext::print(&lbl2, lbl2.size);
+    print(&lbl2, lbl2.size);
     printInt(dsq); printByte('\n');
 
     // Stats — śledź x-wartości czterech punktów
@@ -122,13 +122,13 @@ main := fn() void {
     Stats::update(ss, pd);
 
     lbl3 := "Stats: min=";
-    ext::print(&lbl3, lbl3.size);
+    print(&lbl3, lbl3.size);
     printInt(stats.min_x);
     lbl4 := " max=";
-    ext::print(&lbl4, lbl4.size);
+    print(&lbl4, lbl4.size);
     printInt(stats.max_x);
     lbl5 := " count=";
-    ext::print(&lbl5, lbl5.size);
+    print(&lbl5, lbl5.size);
     printInt(stats.count);
     printByte('\n');
 };

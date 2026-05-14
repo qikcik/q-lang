@@ -461,12 +461,18 @@ generate(ast, { debug: true }) → { bytes, stmtMap }
 ```
 
 ### Import object (wasm-runner.js)
+Import object jest budowany dynamicznie na podstawie `wasmImports` (lista `{ module, field, mangledName }` zwracana przez `generate()`):
 ```js
+// wasm-runner.js buduje importObject dynamicznie:
+for (const { module, field } of wasmImports) {
+  importObject[module] ??= {};
+  importObject[module][field] = hostFunctions[module][field];
+}
 importObject = {
   env: {
-    write_utf8:  (ptr, len) => { /* odczytuje z wasmMemory, dekoduje UTF-8; postMessage({type:'write', text}) — odpowiada ext::print */ },
-    print_utf8:  (ptr, len) => { /* jak wyżej; postMessage({type:'println', text}) — odpowiada ext::printLn; main thread dodaje \n */ },
-    input_utf8:  (ptr, maxLen) => { /* Atomics.wait(ctrl, STATE_INPUT); blokuje Worker do Atomics.notify; STATE_ABORT → throw AbortExecution — odpowiada ext::input */ }
+    write_utf8:  (ptr, len) => { /* odczytuje z wasmMemory, dekoduje UTF-8; postMessage({type:'write', text}) */ },
+    print_utf8:  (ptr, len) => { /* jak wyżej; postMessage({type:'println', text}); main thread dodaje \n */ },
+    input_utf8:  (ptr, maxLen) => { /* Atomics.wait(ctrl, STATE_INPUT); blokuje Worker do Atomics.notify; STATE_ABORT → throw AbortExecution */ }
   },
   // tylko w trybie debug (mode === 'debug'):
   dbg: {
@@ -519,7 +525,7 @@ Wymaga COOP/COEP — serwer `start.js` ustawia nagłówki.
 - `brk()` blokuje Worker przez `Atomics.wait(ctrl, STATE_PAUSE)` — Worker zostaje w dokładnym miejscu wykonania
 - Main thread: Step → `STATE_STEP` (pauzuj przy następnym brk), Continue → `STATE_CONTINUE` (pauzuj na breakpointach)
 - **O(1) stepping** — pamięć WASM persystuje, brak replay od początku
-- I/O (ext::print, ext::input) działa identycznie jak w trybie Run — przez SharedArrayBuffer + konsola IDE
+- I/O (`env.write_utf8`, `env.input_utf8`) działa identycznie jak w trybie Run — przez SharedArrayBuffer + konsola IDE
 
 ### Podświetlenie bieżącej instrukcji
 Po każdym kroku (`'pause'` message) debugger podświetla bieżący `astNode` we wszystkich widokach (identity-based):
@@ -538,9 +544,9 @@ debugSession = {
 ```
 
 ### Konsola w trybie Debug
-Output z WASM (ext::print/printLn) → zielony tekst w konsoli.
+Output z WASM (`env.write_utf8`/`env.print_utf8`) → zielony tekst w konsoli.
 Wiadomości IDE (start/stop/error) → niebieski tekst (`var(--accent)`).
-Stdin (ext::input) → to samo pole stdin co w Run (consolePanel.startInput).
+Stdin (`env.input_utf8`) → to samo pole stdin co w Run (consolePanel.startInput).
 
 ---
 

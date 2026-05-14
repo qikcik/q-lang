@@ -16,13 +16,14 @@
 // ── assert!: klasyczny przykład użycia #stringify ─────────────────────────────
 // #cond zamienia token-argument na StringLiteral w czasie rozwijania makra.
 // $msg i $prefix są gensym'd — brak konfliktu przy wielu assert! w jednej funkcji.
-
+print   : fn(ptr<u8>, i32) void = extern!("env.write_utf8");
+printLn : fn(ptr<u8>, i32) void = extern!("env.print_utf8");
 assert := macro(cond : expr) {
     if (!(@cond)) {
         $prefix := "ASSERT FAILED: ";
         $msg    := #cond;
-        ext::print(&$prefix, $prefix.size);
-        ext::printLn(&$msg, $msg.size);
+        print(&$prefix, $prefix.size);
+        printLn(&$msg, $msg.size);
     }
 };
 
@@ -42,9 +43,9 @@ swap := macro(a : ident, b : ident) {
 print_pair := macro(name_a : ident, name_b : ident) {
     $sa := #name_a;
     $sb := #name_b;
-    ext::print(&$sa, $sa.size);
+    print(&$sa, $sa.size);
     $eq := "=";
-    ext::print(&$eq, $eq.size);
+    print(&$eq, $eq.size);
     // $val_a i $val_b gensym'd, każde wywołanie print_pair! dostaje unikalne
     $val_a : i32 = @name_a;
     $val_b : i32 = @name_b;
@@ -52,19 +53,19 @@ print_pair := macro(name_a : ident, name_b : ident) {
     $ones_a     := $val_a - $hundreds_a * 100;
     $ch : array<mut u8, 1> = { 0 };
     $ch.[0] = as<u8>(48 + $ones_a);
-    ext::print(&$ch, 1);
+    print(&$ch, 1);
     $sp := "  ";
-    ext::print(&$sp, $sp.size);
+    print(&$sp, $sp.size);
     $sb2 := #name_b;
-    ext::print(&$sb2, $sb2.size);
+    print(&$sb2, $sb2.size);
     $eq2 := "=";
-    ext::print(&$eq2, $eq2.size);
+    print(&$eq2, $eq2.size);
     $hundreds_b := $val_b / 100;
     $ones_b     := $val_b - $hundreds_b * 100;
     $ch.[0] = as<u8>(48 + $ones_b);
-    ext::print(&$ch, 1);
+    print(&$ch, 1);
     $nl := "\n";
-    ext::print(&$nl, $nl.size);
+    print(&$nl, $nl.size);
 };
 
 // ── main ──────────────────────────────────────────────────────────────────────
@@ -90,5 +91,5 @@ main := fn() void {
     print_pair!(c, d);
 
     done := "DONE\n";
-    ext::print(&done, done.size);
+    print(&done, done.size);
 };

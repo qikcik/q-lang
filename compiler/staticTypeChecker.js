@@ -42,38 +42,6 @@ export class TypeChecker extends TypeInferBase {
       ns.define('default', { kind: 'scalar-constructor', typeName: name }, 'builtin', false, 0);
     }
 
-    // ext namespace — reserved, cannot be overridden by user code.
-    // ext::print(buf: ptr<u8>, len: u32) void   → WASM import env.write_utf8  (no newline)
-    // ext::printLn(buf: ptr<u8>, len: u32) void  → WASM import env.print_utf8  (adds \n)
-    // ext::input(buf: ptr<mut u8>, len: u32) u32 → WASM import env.input_utf8
-    const extNs = this.globalScope.defineNamespace('ext');
-    extNs.define('print', {
-      name: '__func__', mut: false,
-      _mangledName: 'ext__print',
-      returnType: { kind: 'Type', name: 'void', mut: false },
-      paramTypes: [
-        { kind: 'PtrType', inner: { kind: 'Type', name: 'u8', mut: false }, mut: false },
-        { kind: 'Type', name: 'u32', mut: false },
-      ],
-    }, 'func', false, 0);
-    extNs.define('printLn', {
-      name: '__func__', mut: false,
-      _mangledName: 'ext__printLn',
-      returnType: { kind: 'Type', name: 'void', mut: false },
-      paramTypes: [
-        { kind: 'PtrType', inner: { kind: 'Type', name: 'u8', mut: false }, mut: false },
-        { kind: 'Type', name: 'u32', mut: false },
-      ],
-    }, 'func', false, 0);
-    extNs.define('input', {
-      name: '__func__', mut: false,
-      _mangledName: 'ext__input',
-      returnType: { kind: 'Type', name: 'u32', mut: false },
-      paramTypes: [
-        { kind: 'PtrType', inner: { kind: 'Type', name: 'u8', mut: true }, mut: false },
-        { kind: 'Type', name: 'u32', mut: false },
-      ],
-    }, 'func', false, 0);
   }
 
   pushScope() { this.scope = new Scope(this.scope); }
@@ -85,9 +53,6 @@ export class TypeChecker extends TypeInferBase {
     // Pass 0: register namespace declarations (empty + alias) and file imports
     for (const decl of ast.body) {
       if (decl.kind === 'NamespaceDecl') {
-        if (decl.name === 'ext') {
-          throw new TypeError(`'ext' is a reserved namespace and cannot be declared by user code`, decl);
-        }
         if (decl.target) {
           // Alias: gfx := namespace Engine::Graphics;
           this.scope.define(decl.name, null, 'namespace-alias', false, decl.line);
@@ -98,15 +63,39 @@ export class TypeChecker extends TypeInferBase {
         }
       }
       if (decl.kind === 'NamespaceImport') {
-        // import := namespace "file.qlang"; — mount file scope + register alias
         const nsKey = _filenameToNsKey(decl.filename);
         const entry = importEnv?.get(decl.filename);
         if (!entry) {
           throw new TypeError(`File not found for import: '${decl.filename}'`, decl);
         }
         this.globalScope.mountNamespace(nsKey, entry.scope);
-        this.scope.define(decl.alias, null, 'namespace-alias', false, decl.line);
-        this.scope.symbols.get(decl.alias).target = [nsKey];
+
+        if (decl.alias === null) {
+          // Wildcard: import "file.qlang" — expose all user-defined symbols directly
+          for (const [name, sym] of entry.scope.symbols) {
+            if (sym.kind === 'type') continue; // skip scalar builtins (i32, u8, etc.)
+            try {
+              this.scope.define(name, sym.type, sym.kind, sym.mut ?? false, decl.line);
+            } catch {
+              throw new TypeError(
+                `Wildcard import conflict in '${decl.filename}': name '${name}' already defined`,
+                decl,
+              );
+            }
+          }
+          // Mount user-created namespaces (struct constructors, function namespaces)
+          if (entry.scope.namespaces) {
+            for (const [nsName, nsScope] of entry.scope.namespaces) {
+              if (!this.globalScope.namespaces?.has(nsName)) {
+                this.globalScope.mountNamespace(nsName, nsScope);
+              }
+            }
+          }
+        } else {
+          // Aliased: m := import "file.qlang"
+          this.scope.define(decl.alias, null, 'namespace-alias', false, decl.line);
+          this.scope.symbols.get(decl.alias).target = [nsKey];
+        }
       }
     }
 
@@ -133,9 +122,6 @@ export class TypeChecker extends TypeInferBase {
       }
       // Namespaced function: A::B := fn(...) — mangle name + register in namespace scope
       if (decl.kind === 'NamespacedDecl' && decl.inner.kind === 'FuncDecl') {
-        if (decl.segments[0] === 'ext') {
-          throw new TypeError(`'ext' is a reserved namespace and cannot be declared by user code`, decl);
-        }
         const mangledName = decl.segments.join('__');
         decl.inner.name = mangledName;
         const fd = decl.inner;
@@ -147,6 +133,22 @@ export class TypeChecker extends TypeInferBase {
         const funcType = { name: '__func__', mut: false, returnType, paramTypes, _mangledName: mangledName };
         this.scope.defineQualified(decl.segments, funcType, 'func', false, fd.line);
         fd._type = funcType;
+      }
+      // extern! runtime import: name : fn(...) T = extern!("module.field");
+      if (decl.kind === 'VarDecl' && decl.value?.kind === 'RuntimeImportExpr') {
+        const rie = decl.value;
+        if (!decl.typeAnnot) throw new TypeError(`extern! declaration requires an explicit function type annotation`, decl);
+        const funcType = this.resolveType(decl.typeAnnot, decl);
+        if (!isFunc(funcType)) throw new TypeError(`extern! type annotation must be a function type`, decl);
+        this._runtimeImports ??= new Set();
+        const importKey = `${rie.module}.${rie.field}`;
+        if (this._runtimeImports.has(importKey)) throw new TypeError(`Duplicate extern! declaration for '${importKey}'`, decl);
+        this._runtimeImports.add(importKey);
+        const mangledName = this._filePrefix ? `${this._filePrefix}__${decl.name}` : decl.name;
+        Object.assign(funcType, { _isRuntimeImport: true, _wasmModule: rie.module, _wasmField: rie.field, _mangledName: mangledName });
+        this.scope.define(decl.name, funcType, 'func', false, decl.line);
+        decl._type = funcType;
+        decl._isRuntimeImport = true;
       }
     }
 
@@ -288,6 +290,8 @@ export class TypeChecker extends TypeInferBase {
   }
 
   checkVarDecl(decl, scope) {
+    // extern! declarations are fully handled in Pass 1a — skip deep checking.
+    if (decl._isRuntimeImport) return;
     // Resolve type annotation (handles UserTypeRef for struct types)
     if (decl.typeAnnot) {
       const origAnnot = decl.typeAnnot;
@@ -646,10 +650,6 @@ export function liveTypecheck(ast, importEnv = null) {
   for (const decl of ast.body) {
     if (decl.kind === 'NamespaceDecl') {
       try {
-        if (decl.name === 'ext') {
-          ast.typeErrors.push(new TypeError(`'ext' is a reserved namespace and cannot be declared by user code`, decl));
-          continue;
-        }
         if (decl.target) {
           tc.scope.define(decl.name, null, 'namespace-alias', false, decl.line);
           tc.scope.symbols.get(decl.name).target = decl.target;
@@ -669,8 +669,29 @@ export function liveTypecheck(ast, importEnv = null) {
           continue;
         }
         tc.globalScope.mountNamespace(nsKey, entry.scope);
-        tc.scope.define(decl.alias, null, 'namespace-alias', false, decl.line);
-        tc.scope.symbols.get(decl.alias).target = [nsKey];
+        if (decl.alias === null) {
+          for (const [name, sym] of entry.scope.symbols) {
+            if (sym.kind === 'type') continue;
+            try {
+              tc.scope.define(name, sym.type, sym.kind, sym.mut ?? false, decl.line);
+            } catch {
+              throw new TypeError(
+                `Wildcard import conflict in '${decl.filename}': name '${name}' already defined`,
+                decl,
+              );
+            }
+          }
+          if (entry.scope.namespaces) {
+            for (const [nsName, nsScope] of entry.scope.namespaces) {
+              if (!tc.globalScope.namespaces?.has(nsName)) {
+                tc.globalScope.mountNamespace(nsName, nsScope);
+              }
+            }
+          }
+        } else {
+          tc.scope.define(decl.alias, null, 'namespace-alias', false, decl.line);
+          tc.scope.symbols.get(decl.alias).target = [nsKey];
+        }
       } catch (e) {
         ast.typeErrors.push(e);
       }
@@ -701,10 +722,6 @@ export function liveTypecheck(ast, importEnv = null) {
     // Namespaced function: A::B := fn(...) — mangle name + register in namespace scope
     if (decl.kind === 'NamespacedDecl' && decl.inner.kind === 'FuncDecl') {
       try {
-        if (decl.segments[0] === 'ext') {
-          ast.typeErrors.push(new TypeError(`'ext' is a reserved namespace and cannot be declared by user code`, decl));
-          continue;
-        }
         const mangledName = decl.segments.join('__');
         decl.inner.name = mangledName;
         const fd = decl.inner;
@@ -716,6 +733,26 @@ export function liveTypecheck(ast, importEnv = null) {
         const funcType = { name: '__func__', mut: false, returnType, paramTypes, _mangledName: mangledName };
         tc.scope.defineQualified(decl.segments, funcType, 'func', false, fd.line);
         fd._type = funcType;
+      } catch (e) {
+        ast.typeErrors.push(e);
+      }
+    }
+    // extern! runtime import: name : fn(...) T = extern!("module.field");
+    if (decl.kind === 'VarDecl' && decl.value?.kind === 'RuntimeImportExpr') {
+      try {
+        const rie = decl.value;
+        if (!decl.typeAnnot) throw new TypeError(`extern! declaration requires an explicit function type annotation`, decl);
+        const funcType = tc.resolveType(decl.typeAnnot, decl);
+        if (!isFunc(funcType)) throw new TypeError(`extern! type annotation must be a function type`, decl);
+        tc._runtimeImports ??= new Set();
+        const importKey = `${rie.module}.${rie.field}`;
+        if (tc._runtimeImports.has(importKey)) throw new TypeError(`Duplicate extern! declaration for '${importKey}'`, decl);
+        tc._runtimeImports.add(importKey);
+        const mangledName = tc._filePrefix ? `${tc._filePrefix}__${decl.name}` : decl.name;
+        Object.assign(funcType, { _isRuntimeImport: true, _wasmModule: rie.module, _wasmField: rie.field, _mangledName: mangledName });
+        tc.scope.define(decl.name, funcType, 'func', false, decl.line);
+        decl._type = funcType;
+        decl._isRuntimeImport = true;
       } catch (e) {
         ast.typeErrors.push(e);
       }

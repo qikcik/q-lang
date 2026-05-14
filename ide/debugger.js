@@ -216,7 +216,7 @@ export function initDebugger(generate, log, { onStart, onStop, consolePanel } = 
   function _writeConsole(text)   { if (consolePanel?.write) consolePanel.write(text); else { outConsole.textContent += text; } }
   function _writeLnConsole(text) { _writeConsole(text + '\n'); }
 
-  function _startDebugWorker(bytes, stmtMap, resolvedBreakpoints) {
+  function _startDebugWorker(bytes, stmtMap, resolvedBreakpoints, wasmImports = []) {
     _terminateDebug();
 
     const sharedBuf = new SharedArrayBuffer(SHARED_BUF_SIZE);
@@ -271,6 +271,7 @@ export function initDebugger(generate, log, { onStart, onStop, consolePanel } = 
       sharedBuf,
       mode: 'debug',
       breakpoints: [...resolvedBreakpoints],
+      wasmImports,
     }, [bytesCopy.buffer]);
   }
 
@@ -280,7 +281,7 @@ export function initDebugger(generate, log, { onStart, onStop, consolePanel } = 
       const ast = getLastAst();
       if (!ast) { log('console', 'Kliknij Compile przed Debug.'); return; }
 
-      const { bytes, stmtMap } = generate(ast, { debug: true });
+      const { bytes, stmtMap, wasmImports } = generate(ast, { debug: true });
       if (!stmtMap || stmtMap.size === 0) {
         log('console', 'No statements to debug.');
         return;
@@ -313,7 +314,7 @@ export function initDebugger(generate, log, { onStart, onStop, consolePanel } = 
         ? '\u25ce Debug — running to first breakpoint\u2026'
         : '\u25ce Debug — stepping\u2026');
 
-      _startDebugWorker(bytes, stmtMap, resolvedBreakpoints);
+      _startDebugWorker(bytes, stmtMap, resolvedBreakpoints, wasmImports ?? []);
     } catch (e) {
       log('console', 'Debug compile error: ' + e.message);
       stopDebugger();

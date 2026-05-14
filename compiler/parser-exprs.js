@@ -284,6 +284,11 @@ export class ParserExprs extends ParserBase {
   parsePrimary() {
     const t = this.cur();
 
+    // extern!("module.field") — runtime import expression
+    if (t.type === TT.KEYWORD && t.value === 'extern') {
+      return this._parseRuntimeImportExpr();
+    }
+
     if (t.type === TT.NUMBER) {
       this.pos++;
       const isFloat = t.value.includes('.');
@@ -383,5 +388,24 @@ export class ParserExprs extends ParserBase {
     }
 
     throw new ParseError(`Unexpected token '${t.value}'`, t.line, t.col, t.start, t.end);
+  }
+
+  _parseRuntimeImportExpr() {
+    const kw     = this.eat(TT.KEYWORD, 'extern');
+    this.eat(TT.OP, '!');
+    this.eat(TT.PUNCT, '(');
+    const strTok = this.eat(TT.STRING_LIT);
+    const str    = strTok.value;
+    const dot    = str.lastIndexOf('.');
+    if (dot <= 0 || dot === str.length - 1) {
+      throw new ParseError(
+        `extern! string must be 'module.field', got '${str}'`,
+        strTok.line, strTok.col, strTok.start, strTok.end,
+      );
+    }
+    const module = str.slice(0, dot);
+    const field  = str.slice(dot + 1);
+    const close  = this.eat(TT.PUNCT, ')');
+    return node('RuntimeImportExpr', { module, field, line: kw.line, start: kw.start, end: close.end });
   }
 }

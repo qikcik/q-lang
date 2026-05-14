@@ -490,41 +490,57 @@ res := fptr.*(5);   // 10 — wywołanie przez wskaźnik
 - `fptr.*(args)` dereferencjonuje wskaźnik i wywołuje funkcję (`call_indirect`)
 - Nazwa parametru w typie jest opcjonalna: `ptr<fn(i32) i32>` = `ptr<fn(n: i32) i32>`
 - Sygnatury muszą się zgadzać — typy parametrów i typ zwracany
-- **Nie można** brać adresu funkcji wbudowanej (`&ext__printLn` jest błędem)
+- **Nie można** brać adresu funkcji importowanej przez `extern!` — jest błędem kompilacji
 
-### 5.5 Namespace `ext` — zewnętrzne funkcje runtime
+### 5.5 `extern!` — deklarowanie importów WASM
 
-Namespace `ext` jest **zarezerwowany** i nie może być nadpisany przez kod użytkownika.
-Zawiera funkcje mapowane na importy WASM z modułu `env`:
-
-| Sygnatura | Opis | Import WASM |
-|---|---|---|
-| `ext::print(buf: ptr<u8>, len: u32) void` | Wypisuje `len` bajtów UTF-8 z adresu `buf` — bez znaku nowej linii | `env.write_utf8` |
-| `ext::printLn(buf: ptr<u8>, len: u32) void` | Wypisuje `len` bajtów UTF-8 z adresu `buf`, a następnie `\n` | `env.print_utf8` |
-| `ext::input(buf: ptr<mut u8>, len: u32) u32` | Wczytuje dane od użytkownika do `buf` (maks. `len` bajtów), zwraca liczbę zapisanych bajtów | `env.input_utf8` |
-
-Przykład użycia:
+Składnia `extern!` pozwala użytkownikowi zadeklarować dowolną funkcję z hosta (środowiska WASM) jako widoczny symbol w programie.
 
 ```
-main := fn() void {
-    // ext::print — zapis bez nowej linii; \n musi być w buforze
-    msg : array<u8, 7> = "Hello!\n";
-    ext::print(&msg, msg.size);
+name : fn(ParamTypes...) ReturnType = extern!("module.field");
+```
 
-    // ext::printLn — automatyczna nowa linia
+- `name` — nazwa lokalna funkcji (używana przy wywołaniu jak każda inna)
+- Adnotacja typu `fn(...)` jest **wymagana** — musi to być `FuncType` (nie `ptr<fn>`)
+- Typy parametrów podawane **bez nazw**: `fn(ptr<u8>, i32) void`
+- `"module.field"` — nazwa importu WASM; moduł to wszystko do ostatniej kropki, pole to wszystko po niej
+- Deklaracja `extern!` musi być na poziomie globalnym (nie wewnątrz funkcji)
+- Duplicate `module.field` w obrębie jednego pliku powoduje `TypeError`
+
+Przykład (standardowe I/O hosta IDE):
+
+```
+// Deklaracje importów
+print   : fn(ptr<u8>, i32) void = extern!("env.write_utf8");
+printLn : fn(ptr<u8>, i32) void = extern!("env.print_utf8");
+input   : fn(ptr<mut u8>, i32) i32 = extern!("env.input_utf8");
+
+main := fn() void {
+    // zapis bez nowej linii
+    msg : array<u8, 7> = "Hello!\n";
+    print(&msg, msg.size);
+
+    // automatyczna nowa linia (dodaje host)
     label : array<u8, 5> = "Name:";
-    ext::printLn(&label, label.size);
+    printLn(&label, label.size);
 
     // wczytanie i echo
     buf : array<mut u8, 8> = { 0, 0, 0, 0, 0, 0, 0, 0 };
-    n := ext::input(&buf, 8);
-    ext::print(&buf, n);
+    n := input(&buf, 8);
+    print(&buf, n);
 };
 ```
 
+Typowe importy hosta IDE:
+
+| Deklaracja `extern!` | Import WASM | Opis |
+|---|---|---|
+| `fn(ptr<u8>, i32) void` @ `"env.write_utf8"` | `env.write_utf8` | Wypisuje `len` bajtów UTF-8 — bez `\n` |
+| `fn(ptr<u8>, i32) void` @ `"env.print_utf8"` | `env.print_utf8` | Wypisuje `len` bajtów UTF-8 z `\n` |
+| `fn(ptr<mut u8>, i32) i32` @ `"env.input_utf8"` | `env.input_utf8` | Wczytuje maks. `len` bajtów, zwraca liczbę |
+
 - `&buf` — adres bazowy tablicy (typ `ptr<u8>` lub `ptr<mut u8>`)
-- `buf.size` — stała kompilacji `u32` równa liczbie elementów tablicy
-- namespace `ext` nie może być deklarowany ani rozszerzany przez kod użytkownika
+- `buf.size` — stała kompilacji `i32` równa liczbie elementów tablicy
 
 ### 5.6 Makra (pełna specyfikacja)
 
@@ -760,42 +776,44 @@ defer { stmts };             // odroczone bloki (wiele instrukcji)
 
 **Przykład — scope blokowy (nie funkcja):**
 ```
+// zakładamy: print : fn(ptr<u8>, i32) void = extern!("env.write_utf8");
 main := fn() void {
     {
         open := "open\n";
-        ext::print(&open, open.size);
+        print(&open, open.size);
         defer {
             close := "close\n";
-            ext::print(&close, close.size);
+            print(&close, close.size);
         };
         work := "work\n";
-        ext::print(&work, work.size);
+        print(&work, work.size);
     }   // ← "close" drukuje się TUTAJ, na końcu tego bloku
     after := "after\n";
-    ext::print(&after, after.size);
+    print(&after, after.size);
 };
 // output: open / work / close / after
 ```
 
 **Przykład — cleanup przy wczesnym return:**
 ```
+// zakładamy: print : fn(ptr<u8>, i32) void = extern!("env.write_utf8");
 processResource := fn(ok: bool) void {
     opening := "Opening...\n";
-    ext::print(&opening, opening.size);
+    print(&opening, opening.size);
 
     defer {
         closing := "Closing.\n";
-        ext::print(&closing, closing.size);
+        print(&closing, closing.size);
     };
 
     if (!ok) {
         err := "Error!\n";
-        ext::print(&err, err.size);
+        print(&err, err.size);
         return;          // ← defer wykona się PRZED tym return
     }
 
     done := "Done.\n";
-    ext::print(&done, done.size);
+    print(&done, done.size);
     // defer wykona się tutaj też
 };
 ```

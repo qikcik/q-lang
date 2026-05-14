@@ -30,7 +30,7 @@ class AbortExecution {}
 const decoder = new TextDecoder('utf-8');
 
 self.onmessage = async ({ data }) => {
-  const { bytes, sharedBuf, mode, breakpoints: bpArr } = data;
+  const { bytes, sharedBuf, mode, breakpoints: bpArr, wasmImports = [] } = data;
   const isDebug     = mode === 'debug';
   const breakpoints = new Set(bpArr ?? []);
 
@@ -41,7 +41,8 @@ self.onmessage = async ({ data }) => {
   let wasmMemory = null;
   let stepMode   = isDebug ? 'step' : null;
 
-  const importObject = {
+  // All host functions available to extern! declarations
+  const hostFunctions = {
     env: {
       write_utf8: (ptr, len) => {
         if (!wasmMemory) return;
@@ -65,6 +66,18 @@ self.onmessage = async ({ data }) => {
       },
     },
   };
+
+  // Build importObject dynamically from wasmImports
+  const importObject = {};
+  for (const { module, field } of wasmImports) {
+    const fn = hostFunctions[module]?.[field];
+    if (!fn) {
+      self.postMessage({ type: 'error', message: `Unknown host function: ${module}.${field}` });
+      return;
+    }
+    importObject[module] ??= {};
+    importObject[module][field] = fn;
+  }
 
   if (isDebug) {
     importObject.dbg = {

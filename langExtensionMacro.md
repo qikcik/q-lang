@@ -177,10 +177,11 @@ y := f64::default;                          // 0.0
 ### 9.1 assert
 
 ```
+// zakładamy: printLn : fn(ptr<u8>, i32) void = extern!("env.print_utf8");
 assert := macro(cond : expr) {
     if (!@cond) {
         msg : array<u8, 16> = "assert failed!\n";
-        ext::printLn(&msg, msg.size);
+        printLn(&msg, msg.size);
     }
 };
 
@@ -363,10 +364,11 @@ Działa na **dowolnym kindzie**:
 ### Przykład: assert z komunikatem
 
 ```
+// zakładamy: printLn : fn(ptr<u8>, i32) void = extern!("env.print_utf8");
 assert := macro(cond : expr) {
     if (!(@cond)) {
         msg := #cond;
-        ext::printLn(&msg, msg.size);
+        printLn(&msg, msg.size);
     }
 };
 

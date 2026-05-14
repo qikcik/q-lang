@@ -9,7 +9,9 @@
 //   fptr.*(arg)       — wywołanie przez wskaźnik (call_indirect)
 //   apply(f, x)       — funkcja wyższego rzędu przyjmująca ptr<fn>
 //   dispatch(i, x)    — tablica dispatchów przez if/else if + unary minus (-1)
+// ── Runtime imports ──────────────────────────────────────────────────────────────
 
+print : fn(ptr<u8>, i32) void = extern!("env.write_utf8");
 // ── Math functions ────────────────────────────────────────────────────────────
 
 double := fn(n: i32) i32 { return n + n; };
@@ -21,7 +23,7 @@ square := fn(n: i32) i32 { return n * n; };
 printByte := fn(b: u8) void {
     ch : array<mut u8, 1> = { 0 };
     ch.[0] = b;
-    ext::print(&ch, 1);
+    print(&ch, 1);
 };
 
 printInt := fn(n: i32) void {
@@ -60,18 +62,18 @@ main := fn() void {
     fp : ptr<fn(n: i32) i32> = &double;
     r0 := fp.*(5);
     lbl0 := "double(5) = ";
-    ext::print(&lbl0, lbl0.size);
+    print(&lbl0, lbl0.size);
     printInt(r0); printByte('\n');
 
     // higher-order apply — przekazanie ptr<fn> jako argument
     r1 := apply(&triple, 5);
     lbl1 := "apply(triple, 5) = ";
-    ext::print(&lbl1, lbl1.size);
+    print(&lbl1, lbl1.size);
     printInt(r1); printByte('\n');
 
     r2 := apply(&square, 4);
     lbl2 := "apply(square, 4) = ";
-    ext::print(&lbl2, lbl2.size);
+    print(&lbl2, lbl2.size);
     printInt(r2); printByte('\n');
 
     // dispatch table
@@ -79,7 +81,7 @@ main := fn() void {
     while (i < 3) {
         r := dispatch(i, 5);
         lbl3 := "dispatch(_, 5) = ";
-        ext::print(&lbl3, lbl3.size);
+        print(&lbl3, lbl3.size);
         printInt(r); printByte('\n');
         i = i + 1;
     }

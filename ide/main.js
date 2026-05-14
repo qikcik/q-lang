@@ -90,7 +90,8 @@ function clearStale() {
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
-let lastWasmBytes = null;
+let lastWasmBytes   = null;
+let lastWasmImports = [];
 let lastModule    = null;
 let lastSSpans    = [];
 let _compiled     = false;    // true after successful Compile; gates Run/Debug
@@ -240,8 +241,9 @@ editor.addEventListener('paste', e => {
  * Called from btnCompile AND from the debug start path.
  */
 function applyGenerateResult(ast) {
-  const { bytes, byteSpans, watText, watSpans, module, sSpans, stmtMap } = generate(ast);
-  lastWasmBytes = bytes;
+  const { bytes, byteSpans, watText, watSpans, module, sSpans, stmtMap, wasmImports } = generate(ast);
+  lastWasmBytes   = bytes;
+  lastWasmImports = wasmImports ?? [];
   lastModule    = module;
   lastSSpans    = sSpans;
   setStmtMap(stmtMap);
@@ -374,7 +376,7 @@ btnRun.addEventListener('click', () => {
 
   // Transfer a copy so lastWasmBytes stays intact for the debugger
   const bytesCopy = lastWasmBytes.slice();
-  worker.postMessage({ bytes: bytesCopy, sharedBuf, mode: 'run' }, [bytesCopy.buffer]);
+  worker.postMessage({ bytes: bytesCopy, sharedBuf, mode: 'run', wasmImports: lastWasmImports }, [bytesCopy.buffer]);
 });
 
 // ── Stop ──────────────────────────────────────────────────────────────────────

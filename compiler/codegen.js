@@ -33,10 +33,10 @@ import {
 //   watText: string         — WAT S-expression text for WAT Explorer
 //   watSpans: TextSpan[]    — [{ watStart, watEnd, astNode }] char offsets in watText
 export function generate(ast, { debug = false } = {}) {
-  const { module, sSpans, stmtMap }      = buildWAT(ast, { debug });
+  const { module, sSpans, stmtMap, wasmImports } = buildWAT(ast, { debug });
   const { text: watText, spans: watSpans } = watToText(module, sSpans);
-  const { bytes, byteSpans }             = sExprToWasm(module, sSpans);
-  return { bytes, byteSpans, watText, watSpans, module, sSpans, stmtMap };
+  const { bytes, byteSpans }               = sExprToWasm(module, sSpans);
+  return { bytes, byteSpans, watText, watSpans, module, sSpans, stmtMap, wasmImports };
 }
 
 // sExprToWasm(module, sSpans?) → { bytes: Uint8Array, byteSpans: ByteSpan[] }

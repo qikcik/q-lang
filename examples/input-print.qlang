@@ -1,17 +1,20 @@
-// QLang — ext::print i ext::input
+// QLang — print i input via extern!
 //
-// 1. Wypisuje powitanie korzystając z ext::print.
-// 2. Wczytuje do 8 bajtów od użytkownika (ext::input) i wypisuje je z powrotem.
+// 1. Wypisuje powitanie korzystając z print (extern! env.write_utf8).
+// 2. Wczytuje do 8 bajtów od użytkownika (input) i wypisuje je z powrotem.
 //
 // Uruchom: Compile → Run → zostaniesz zapytany o tekst (do 8 znaków).
 
-main := fn() void {
-    // ext::print — wypisz statyczny ciąg znaków ("Hi!\n" = 72,105,33,10)
-    greeting : array<u8, 4> = { 72, 105, 33, 10 };
-    ext::print(&greeting, 4);
+print : fn(ptr<u8>, i32) void = extern!("env.write_utf8");
+input : fn(ptr<mut u8>, i32) i32 = extern!("env.input_utf8");
 
-    // ext::input — wczytaj do bufora (max 8 bajtów) i wypisz z powrotem
+main := fn() void {
+    // print — wypisz statyczny ciąg znaków
+    greeting : array<u8, 4> = { 72, 105, 33, 10 };
+    print(&greeting, 4);
+
+    // input — wczytaj do bufora (max 8 bajtów) i wypisz z powrotem
     buf : array<mut u8, 8> = { 0, 0, 0, 0, 0, 0, 0, 0 };
-    n := ext::input(&buf, 8);
-    ext::print(&buf, n);
+    n := input(&buf, 8);
+    print(&buf, n);
 };

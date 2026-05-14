@@ -48,6 +48,8 @@ export const HINTS = {
   defer:  { label: 'defer expr;',             detail: 'registers expr to be evaluated at the end of the enclosing function scope (reverse order)' },
   struct: { label: 'struct { fields }',       detail: 'declares a named product type; fields are const by default, mark with mut to allow writes; passed as i32 base address' },
   namespace: { label: 'namespace',             detail: 'declares or aliases a namespace scope for organizing declarations' },
+  import:    { label: 'import "file.qlang"',   detail: 'imports declarations from another source file into the current namespace; resolved at compile time' },
+  extern:    { label: 'extern!("module.field")', detail: 'declares a WASM runtime import; the type annotation fn(...) ReturnType is required; e.g.: print : fn(ptr<u8>, i32) void = extern!("env.write_utf8");' },
 
   // ── Macro parameter kinds ───────────────────────────────────────────────────
 
