@@ -255,6 +255,9 @@ function getNamespaceMembers(nsName) {
           if (sym.kind === 'func' && sym.type?.name === '__func__') {
             if (!members.find(m => m.label === symName))
               members.push({ label: symName, typeStr: typeStr(sym.type) });
+          } else if (sym.kind === 'var') {
+            if (!members.find(m => m.label === symName))
+              members.push({ label: symName, typeStr: sym.type ? typeStr(sym.type) : null });
           }
         }
       }

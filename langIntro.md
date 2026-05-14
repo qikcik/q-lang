@@ -118,7 +118,7 @@ gfx::draw();          // → Engine::Graphics::draw()
 - Namespace'y tylko top-level (nie wewnątrz funkcji)
 - Brak `use std::foo;` (import do bieżącego scope)
 - Brak private/public — wszystko publiczne
-- Namespace'd variables (`std::BAR := 42;`) — parser obsługuje, codegen deferred do v2
+- Namespace-level bindings są wspierane tylko jako consty z bezpośredniego literału (`std::BAR := 42;`); `mut` i runtime global state pozostają poza v1
 
 ---
 

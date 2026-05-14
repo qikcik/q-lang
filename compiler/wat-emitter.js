@@ -372,7 +372,15 @@ function emitLiteral(b, expr) {
 
 function emitIdent(b, expr, ctx) {
   const close = b.openSpan(expr);
-  b.push(['local.get', `$${expr.name}`]);
+  if (expr._constValue !== undefined) {
+    const t = canonType(expr._type);
+    if (t === 'i32')      b.push(['i32.const', expr._constValue ? Math.trunc(expr._constValue) : 0]);
+    else if (t === 'i64') b.push(['i64.const', Math.trunc(expr._constValue)]);
+    else if (t === 'f32') b.push(['f32.const', expr._constValue]);
+    else                  b.push(['f64.const', expr._constValue]);
+  } else {
+    b.push(['local.get', `$${expr.name}`]);
+  }
   close();
 }
 
@@ -456,6 +464,9 @@ function emitUnary(b, expr, ctx) {
     if (ty === 'f64') {
       emitExpr(b, expr.operand, ctx);
       b.push('f64.neg');
+    } else if (ty === 'f32') {
+      emitExpr(b, expr.operand, ctx);
+      b.push('f32.neg');
     } else {
       b.push(['i32.const', 0]);
       emitExpr(b, expr.operand, ctx);
@@ -566,6 +577,12 @@ function emitQualifiedName(b, expr, ctx) {
       for (const arg of expr.args) emitExpr(b, arg, ctx);
     }
     b.push(['call', `$${expr._mangledName}`]);
+  } else if (kind === 'namespace-const') {
+    const t = canonType(expr._type);
+    if (t === 'i32')      b.push(['i32.const', expr._constValue ? Math.trunc(expr._constValue) : 0]);
+    else if (t === 'i64') b.push(['i64.const', Math.trunc(expr._constValue)]);
+    else if (t === 'f32') b.push(['f32.const', expr._constValue]);
+    else                  b.push(['f64.const', expr._constValue]);
   } else {
     throw new Error(`[WAT] Unknown QualifiedName _resolvedKind '${kind}'`);
   }

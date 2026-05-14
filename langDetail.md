@@ -1,6 +1,6 @@
 # QLang — Specyfikacja Szczegółowa
 
-> Stan na: 2026-05-13 (aktualizacja: **`else if`**, **unary minus (`-expr`)**, `void`, `arr.[i]` BracketAccessExpr jako jedyna składnia, `pack`/`#expand`, `T::of/default`, makra; **strukty** — Item 13; **namespace'y** — Item 13; **literały znakowe `'x'`** i **konkatenacja sąsiednich string literals**; **`defer`** (§11.2), **`break`** (§11.3), resilient parser, multi-file project (VFS))
+> Stan na: 2026-05-14 (aktualizacja: **`else if`**, **unary minus (`-expr`)**, `void`, `arr.[i]` BracketAccessExpr jako jedyna składnia, `pack`/`#expand`, `T::of/default`, makra; **strukty** — Item 13; **namespace'y** — Item 13; **literały znakowe `'x'`** i **konkatenacja sąsiednich string literals**; **`defer`** (§11.2), **`break`** (§11.3), resilient parser, multi-file project (VFS), importowane namespace'y z literalnymi constami, browser game runtime)
 > Iteracyjnie uzupełniana przy każdym zrealizowanym todo.
 > Wprowadzenie i przegląd: [langIntro.md](langIntro.md)
 
@@ -211,6 +211,8 @@ x = x + 1;        // OK
 ```
 
 > Forma inferred (`x := expr`) nie przyjmuje `mut` — jeśli potrzebujesz zmiennej mutowalnej, zawsze podaj pełny typ z `mut`.
+
+> **Ograniczenie top-level:** deklaracje top-level (`x : ... = ...;`) i namespace-level (`cfg::X := ...;`) są obecnie zawsze **const**. `mut` na top-level jest błędem kompilacji. Dopuszczony jest tylko nie-mutowalny binding; dla namespace-level bindingów v1 dodatkowo wymagany jest bezpośredni literał po prawej stronie.
 
 ### 3.3 Tablice: mut na dwóch poziomach
 
@@ -715,10 +717,10 @@ if (cmd == 'w') { ... }
 ## 10. Ograniczenia bieżącej implementacji
 
 - Struktury wsparcie podstawowe (pola skalarne + tablice; brak zagnieżdżonych struktur w polach przy codegen)
-- Brak modułów i importów użytkownika
+- Import plikowy działa tylko przez alias namespace: `m := namespace "math.qlang";` — brak `use std::foo;` i brak re-exportów
 - Brak tablic wielowymiarowych
-- Top-level var decls nie są globalami WASM
-- Namespace'd variables (`std::BAR := 42;`) — parser obsługuje, codegen/typechecker deferred do v2
+- Top-level var decls nie są globalami WASM. W v1 działają jako compile-time const bindings tylko wtedy, gdy inicjalizator jest bezpośrednim literałem.
+- Namespace-level var decls (`std::BAR := 42;`) są wspierane tylko w wąskim wariancie: const-only, top-level only, inicjalizator musi być bezpośrednim literałem. Nie ma runtime `global.get` / `global.set` dla mutowalnego stanu.
 - Brak `use std::foo;` (import do bieżącego scope)
 - Brak private/public w namespace'ach — wszystko publiczne
 
@@ -945,6 +947,7 @@ Type-checker resolve'uje `QualifiedName` i taguje `_resolvedKind`:
 | `'scalar-constructor'` | `i32::of(3.7)`, `f64::default` | Konstruktor skalara |
 | `'struct-constructor'` | `Player::of(1,2)`, `Player::default` | Konstruktor struktury |
 | `'namespace-func'` | `std::foo()`, `Player::kill(p)` | Funkcja z namespace |
+| `'namespace-const'` | `cfg::SCALE`, `colors::WHITE` | Compile-time const z namespace |
 
 ### 13.7 Scope model
 
@@ -960,7 +963,7 @@ Klasa `Scope` (staticAnalysis.js) posiada `namespaces: Map<string, Scope>`:
 | Pass | Co robi z namespace'ami |
 |------|------------------------|
 | **Pass 0** | Rejestruje `NamespaceDecl` — empty namespace lub alias |
-| **Pass 1a** | Rejestruje `NamespacedDecl` z `FuncDecl` — mangle name + `defineQualified()` |
+| **Pass 1a** | Rejestruje `NamespacedDecl` z `FuncDecl` oraz const-only `VarDecl` — funkcje są manglowane, consty trafiają do scope namespace z metadanymi compile-time |
 | **Pass 1b** | Struct placeholders — auto-namespace tworzony w Pass 2 |
 | **Pass 2** | Pełne sprawdzanie — `inferQualifiedName()` resolve'uje segmenty |
 
@@ -969,6 +972,7 @@ Klasa `Scope` (staticAnalysis.js) posiada `namespaces: Map<string, Scope>`:
 - `std::foo` → WASM function `$std__foo` (double underscore separator)
 - `funcIndex` mapa: klucz = mangled name string
 - `QualifiedName` z `_resolvedKind: 'namespace-func'` → `call $mangled`
+- `QualifiedName` z `_resolvedKind: 'namespace-const'` → bezpośredni emit literału (`i32.const`, `f32.const`, itd.), bez globala runtime
 - Struct constructors bez zmian — `emitStructInit` sprawdza `_resolvedKind`
 
 ### 13.10 Ograniczenia v1
@@ -977,8 +981,8 @@ Klasa `Scope` (staticAnalysis.js) posiada `namespaces: Map<string, Scope>`:
 - Brak `use std::foo;` (import do bieżącego scope)
 - Brak private/public — wszystko publiczne
 - Brak metod na strukturach (fn z implicit `self`) — tylko "static functions"
-- Namespace'd variables (`std::BAR := 42;`) — parser obsługuje, ale typechecker nie rejestruje
-  w namespace scope, codegen nie emituje `global.get`/`global.set`. Deferred do v2.
+- Namespace-level zmienne są ograniczone do constów z bezpośredniego literału. `cfg::SCALE := 128 + 128;` jest odrzucane; `cfg::counter : mut i32 = 0;` jest odrzucane.
+- Importowane consty są wspierane tylko dla tych literalnych top-level bindingów; nie ma ogólnego compile-time evaluation dla dowolnych wyrażeń.
 - `void` pozostaje keyword (nie namespace-owalny)
 
 ---
@@ -1003,6 +1007,16 @@ b := m::Vec2::of(1, 2);
 d := m::Vec2::dot(a, b);       // funkcja z importowanego pliku (3-segmentowa nazwa)
 ```
 
+**Dostęp do importowanych constów literalnych:**
+
+```
+colors := namespace "colors.qlang";   // colors.qlang: WHITE := 0xFFFFFFFF;
+
+bg := colors::WHITE;                   // compile-time const
+```
+
+Binding importowany w ten sposób zachowuje się jak const compile-time. W v1 działa tylko dla top-level / namespace-level deklaracji z bezpośrednim literałem po prawej stronie.
+
 **Qualified type annotations:**
 
 Importowany typ może być użyty w **pozycji typowej** (jawna adnotacja) — zarówno w zmiennych, parametrach funkcji, jak i polach struktur:
@@ -1025,3 +1039,4 @@ Entity := struct { id: i32; pos: m::Vec2; };
 - Import tylko z jednego poziomu — brak transitive re-exportów
 - Deklaracja importu tylko na top-level (nie wewnątrz funkcji)
 - Cykliczne importy wykrywane i zgłaszane jako błąd
+- Importowany mutable global state nie jest wspierany — tylko const bindings z literalnych deklaracji

@@ -59,6 +59,7 @@ const watRoot     = document.getElementById('wat-root');
 // Component refs (graceful fallback if not yet upgraded)
 const errorPanel   = document.getElementById('error-panel');
 const consolePanel = document.getElementById('console-panel');
+const gameCanvas   = document.getElementById('game-canvas');
 
 // VFS + layout refs
 const fileTreeEl       = document.getElementById('file-tree');
@@ -253,6 +254,7 @@ function applyGenerateResult(ast) {
 }
 
 btnCompile.addEventListener('click', () => {
+  gameCanvas?.hide?.();  // hide game canvas on each new compile
   clearOutputs();
   try {
     const src             = getCompileSource();
@@ -298,15 +300,55 @@ btnCompile.addEventListener('click', () => {
 // ── Run ───────────────────────────────────────────────────────────────────────
 
 // SharedArrayBuffer layout: [0..3]=state  [4..7]=len  [8..1031]=data
-const STATE_IDLE  =  0;
-const STATE_READY =  2;
-const STATE_ABORT = -1;
+const STATE_IDLE     =  0;
+const STATE_READY    =  2;
+const STATE_EXT_WAIT =  6;   // Worker blocked waiting for RAF tick (game loop)
+const STATE_ABORT    = -1;
 const SHARED_BUF_SIZE = 8 + 1024;
 
-let _runWorker = null;   // active Worker, if any
+let _runWorker   = null;   // active Worker, if any
+let _rafId       = null;   // requestAnimationFrame id for game loop
+let _gameRunCtrl = null;   // Int32Array ctrl SAB ref, used by RAF loop
+let _presentRafId = null;  // requestAnimationFrame id for frame presentation
+let _pendingBitmap = null; // latest frame waiting to be blitted
+
+function startGameRaf(ctrl) {
+  if (_rafId !== null) return;  // idempotent
+  _gameRunCtrl = ctrl;
+  function tick() {
+    if (Atomics.load(ctrl, 0) === STATE_EXT_WAIT) {
+      Atomics.store(ctrl, 0, STATE_IDLE);
+      Atomics.notify(ctrl, 0, 1);
+    }
+    _rafId = requestAnimationFrame(tick);
+  }
+  _rafId = requestAnimationFrame(tick);
+}
+
+function stopGameRaf() {
+  if (_rafId !== null) { cancelAnimationFrame(_rafId); _rafId = null; }
+  if (_presentRafId !== null) { cancelAnimationFrame(_presentRafId); _presentRafId = null; }
+  if (_pendingBitmap?.close) _pendingBitmap.close();
+  _pendingBitmap = null;
+  _gameRunCtrl = null;
+}
+
+function scheduleFramePresent(bitmap) {
+  if (_pendingBitmap?.close) _pendingBitmap.close();
+  _pendingBitmap = bitmap;
+  if (_presentRafId !== null) return;
+  _presentRafId = requestAnimationFrame(() => {
+    _presentRafId = null;
+    const bmp = _pendingBitmap;
+    _pendingBitmap = null;
+    if (bmp) gameCanvas?.blit?.(bmp);
+  });
+}
 
 function _terminateRun() {
   if (!_runWorker) return;
+  stopGameRaf();
+  gameCanvas?.hide?.();
   _runWorker.terminate();
   _runWorker = null;
   consolePanel?.cancelInput?.();
@@ -354,8 +396,25 @@ btnRun.addEventListener('click', () => {
           Atomics.notify(ctrl, 0, 1);
         });
         break;
+      case 'window-open': {
+        const { w, h, inputBuf: gameSAB } = data;
+        gameCanvas?.show?.(w, h, gameSAB);
+        startGameRaf(ctrl);
+        // Unblock Worker (was waiting on STATE_EXT_WAIT from init_window)
+        Atomics.store(ctrl, 0, STATE_IDLE);
+        Atomics.notify(ctrl, 0, 1);
+        break;
+      }
+      case 'frame':
+        scheduleFramePresent(data.bitmap);
+        break;
+      case 'warn':
+        log('console', '⚠ ' + data.message);
+        break;
       case 'done': {
         const { result, elapsed } = data;
+        stopGameRaf();
+        gameCanvas?.hide?.();
         if (result !== undefined && result !== null) log('console', 'main() = ' + result);
         log('console', 'execution time: ' + elapsed.toFixed(3) + 'ms');
         worker.terminate();
@@ -365,6 +424,8 @@ btnRun.addEventListener('click', () => {
         break;
       }
       case 'error':
+        stopGameRaf();
+        gameCanvas?.hide?.();
         log('console', 'Runtime error: ' + data.message);
         worker.terminate();
         _runWorker = null;
@@ -376,7 +437,11 @@ btnRun.addEventListener('click', () => {
 
   // Transfer a copy so lastWasmBytes stays intact for the debugger
   const bytesCopy = lastWasmBytes.slice();
-  worker.postMessage({ bytes: bytesCopy, sharedBuf, mode: 'run', wasmImports: lastWasmImports }, [bytesCopy.buffer]);
+  const transfer = [bytesCopy.buffer];
+  worker.postMessage(
+    { bytes: bytesCopy, sharedBuf, mode: 'run', wasmImports: lastWasmImports },
+    transfer,
+  );
 });
 
 // ── Stop ──────────────────────────────────────────────────────────────────────

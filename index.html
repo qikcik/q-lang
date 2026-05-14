@@ -587,6 +587,27 @@
     #out-console { color: var(--green); }
     #out-errors  { color: var(--red); white-space: normal; line-height: 1.4; }
 
+    /* ── Game canvas ───────────────────────────────────────────────────
+       Hidden by default; shown when a game program calls init_window.       */
+    qlang-canvas {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+      align-items: center;
+      justify-content: center;
+      background: var(--surface);
+      padding: 8px;
+      outline: none;
+    }
+    qlang-canvas canvas {
+      max-width: 100%;
+      max-height: 100%;
+      display: block;
+      image-rendering: pixelated;
+      background: #000;
+      border: 1px solid var(--border);
+    }
+
     /* ── Console: flex column so stdin row sits below output ───────────── */
     qlang-console {
       display: flex;
@@ -1080,6 +1101,15 @@
 
     <div class="row-handle"></div>
 
+    <qlang-pane data-view="canvas">
+      <div class="pane-label" draggable="true">Game Canvas</div>
+      <qlang-canvas id="game-canvas">
+        <canvas></canvas>
+      </qlang-canvas>
+    </qlang-pane>
+
+    <div class="row-handle"></div>
+
     <qlang-pane data-view="errors">
       <div class="pane-label" draggable="true">Errors</div>
       <qlang-error-panel id="error-panel">
@@ -1105,6 +1135,7 @@
 <script type="module" src="./ide/qlang-pane.js"></script>
 <script type="module" src="./ide/qlang-error-panel.js"></script>
 <script type="module" src="./ide/qlang-console.js"></script>
+<script type="module" src="./ide/qlang-canvas.js"></script>
 <script type="module" src="./ide/qlang-toolbar.js"></script>
 <script type="module" src="./ide/file-tree.js"></script>
 <script type="module" src="./ide/layout.js"></script>

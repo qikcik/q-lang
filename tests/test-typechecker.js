@@ -151,6 +151,11 @@ test('f64 != f64 → TypeError (floating-point equality forbidden)', () => {
   assertThrows(() => compile('main := fn() i32 { x := 1.0; b := x != x; return 0; };'), TypeError);
 });
 
+test('unary minus on f32 is allowed', () => {
+  const { ast } = compile('main := fn() i32 { x : f32 = 1.0; y : f32 = -x; return 0; };');
+  assertEq(ast.body[0].body.body[1].value._type.name, 'f32');
+});
+
 // ── TypeChecker — as<T> scalar conversion validation ────────────────────────
 
 test('as<i32>(f64) allowed', () => {
@@ -196,6 +201,22 @@ suite('TypeChecker — warnings');
 
 test('shadowing is a compile error', () => {
   assertThrows(() => compile('x := 3; x := 5;'), TypeError, 'already declared');
+});
+
+test('top-level mut variable is rejected', () => {
+  assertThrows(
+    () => compile('counter : mut i32 = 0; main := fn() i32 { return 0; };'),
+    TypeError,
+    'Top-level variable',
+  );
+});
+
+test('namespaced top-level mut variable is rejected', () => {
+  assertThrows(
+    () => compile('cfg::counter : mut i32 = 0; main := fn() i32 { return 0; };'),
+    TypeError,
+    'Top-level variable',
+  );
 });
 
 // ── ScopeBlock ────────────────────────────────────────────────────────────────

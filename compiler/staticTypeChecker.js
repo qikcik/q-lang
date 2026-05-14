@@ -186,7 +186,7 @@ export class TypeChecker extends TypeInferBase {
 
   checkNamespacedDecl(decl) {
     if (decl.inner.kind === 'FuncDecl') return this.checkFuncDecl(decl.inner);
-    if (decl.inner.kind === 'VarDecl')  return this.checkVarDecl(decl.inner, this.scope);
+    if (decl.inner.kind === 'VarDecl')  return this.checkVarDecl(decl.inner, this.scope, true);
     throw new TypeError(`Unsupported namespaced declaration kind '${decl.inner.kind}'`, decl);
   }
 
@@ -289,9 +289,30 @@ export class TypeChecker extends TypeInferBase {
     return normalizeType(typeAnnot);
   }
 
-  checkVarDecl(decl, scope) {
+  checkVarDecl(decl, scope, isNamespacedTopLevel = false) {
     // extern! declarations are fully handled in Pass 1a — skip deep checking.
     if (decl._isRuntimeImport) return;
+
+    // Language rule: top-level (global) vars are immutable constants only.
+    if (scope === this.globalScope && decl.typeAnnot?.mut) {
+      throw new TypeError(
+        `Top-level variable '${decl.name}' cannot be 'mut'`,
+        decl,
+      );
+    }
+
+    // Temporary hard stop: namespace-level variables must be assigned directly
+    // from literals until a full const-eval mechanism is designed.
+    if (scope === this.globalScope && isNamespacedTopLevel) {
+      const k = decl.value?.kind;
+      if (k !== 'Literal' && k !== 'StringLiteral') {
+        throw new TypeError(
+          `Namespace-level variable '${decl.name}' must be assigned from a literal`,
+          decl,
+        );
+      }
+    }
+
     // Resolve type annotation (handles UserTypeRef for struct types)
     if (decl.typeAnnot) {
       const origAnnot = decl.typeAnnot;
@@ -349,8 +370,26 @@ export class TypeChecker extends TypeInferBase {
       decl._type = { ...valueType, mut: false };
     }
 
+    // Do not propagate const metadata through local temporaries.
+    // Global consts may carry _constValue for direct Identifier reads,
+    // but locals must always be treated as runtime values.
+    if (scope !== this.globalScope && decl._type && decl._type._constValue !== undefined) {
+      delete decl._type._constValue;
+    }
+
     const bindingMut = decl.typeAnnot ? (decl.typeAnnot.mut ?? false) : false;
     scope.define(decl.name, decl._type, 'var', bindingMut, decl.line);
+
+    // Store raw literal value for immutable global constants.
+    // This is not const-eval: only direct Literal nodes are supported.
+    if (scope === this.globalScope) {
+      if (decl.value?.kind === 'Literal') {
+        decl._type._constValue = decl.value.value;
+        const sym = scope.symbols.get(decl.name);
+        if (sym?.type) sym.type._constValue = decl.value.value;
+      }
+    }
+
     decl.value._type = decl._type;
     return decl._type;
   }

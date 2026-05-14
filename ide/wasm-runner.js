@@ -10,20 +10,26 @@
 // Incoming: { bytes, sharedBuf, mode: 'run'|'debug', breakpoints?: number[] }
 //
 // Outgoing:
-//   { type: 'write',   text }           — ext::print  (no newline)
-//   { type: 'println', text }           — ext::printLn (main adds \n)
-//   { type: 'input-wait' }              — ext::input waiting for stdin
-//   { type: 'pause',   stmtId }        — debug: paused at brk()
-//   { type: 'done',    result, elapsed }
-//   { type: 'error',   message }
+//   { type: 'write',      text }                    — ext::print  (no newline)
+//   { type: 'println',    text }                    — ext::printLn (main adds \n)
+//   { type: 'input-wait' }                          — ext::input waiting for stdin
+//   { type: 'pause',      stmtId }                 — debug: paused at brk()
+//   { type: 'window-open', w, h, inputBuf }        — game: init_window called
+//   { type: 'frame',       bitmap }                — game: end_frame bitmap
+//   { type: 'warn',        message }               — runtime warning (batch overflow etc.)
+//   { type: 'done',        result, elapsed }
+//   { type: 'error',       message }
 
-const STATE_IDLE     =  0;
-const STATE_INPUT    =  1;   // Worker blocked — waiting for stdin
-const STATE_INPUTOK  =  2;   // Main thread filled input buffer
-const STATE_PAUSE    =  3;   // Debug: Worker blocked at breakpoint
-const STATE_STEP     =  4;   // Debug: resume, pause at next brk()
-const STATE_CONTINUE =  5;   // Debug: resume, pause only at breakpoints
-const STATE_ABORT    = -1;
+const STATE_IDLE      =  0;
+const STATE_INPUT     =  1;   // Worker blocked — waiting for stdin
+const STATE_INPUTOK   =  2;   // Main thread filled input buffer
+const STATE_DBG_PAUSE =  3;   // Debug: Worker blocked at breakpoint
+const STATE_DBG_STEP  =  4;   // Debug: resume, pause at next brk()
+const STATE_DBG_CONT  =  5;   // Debug: resume, pause only at breakpoints
+const STATE_EXT_WAIT  =  6;   // Worker waiting for external signal (begin_frame / init_window)
+const STATE_ABORT     = -1;
+
+import { WebGL2Renderer } from './gfx-renderer.js';
 
 class AbortExecution {}
 
@@ -41,8 +47,89 @@ self.onmessage = async ({ data }) => {
   let wasmMemory = null;
   let stepMode   = isDebug ? 'step' : null;
 
+  // Game state (populated by gfx.init_window)
+  let renderer       = null;
+  let gameInputBuf   = null;   // SAB for input — created by Worker, sent to main via window-open
+  let inputArr       = null;   // Int32Array view of gameInputBuf (key bitset + mouse)
+  let prevKeyArr     = new Int32Array(4);  // previous-frame key state for is_key_pressed
+  let _lastFrameMs   = 16.67;
+  let _lastFrameStart = 0;
+
   // All host functions available to extern! declarations
   const hostFunctions = {
+    gfx: {
+      // ── Window / Frame ───────────────────────────────────────────────────
+      init_window: (w, h) => {
+        // Create input SAB (Worker-owned; 64 bytes)
+        //   bytes  0-15: key bitset (4 × Int32 = 128 bits, one per keycode 0-127)
+        //   bytes 16-19: mouse X
+        //   bytes 20-23: mouse Y
+        //   bytes 24-27: mouse buttons bitfield
+        //   bytes 28-43: prev key state (Worker-private, for is_key_pressed)
+        gameInputBuf = new SharedArrayBuffer(64);
+        inputArr     = new Int32Array(gameInputBuf);
+        prevKeyArr   = new Int32Array(4);
+        Atomics.store(ctrl, 0, STATE_EXT_WAIT);
+        self.postMessage({ type: 'window-open', w, h, inputBuf: gameInputBuf });
+        Atomics.wait(ctrl, 0, STATE_EXT_WAIT);
+        if (Atomics.load(ctrl, 0) === STATE_ABORT) throw new AbortExecution();
+        renderer = new WebGL2Renderer(w, h);
+        _lastFrameStart = performance.now();
+      },
+
+      begin_frame: () => {
+        if (!renderer) return;
+        // Copy current key state to prev (for is_key_pressed)
+        for (let i = 0; i < 4; i++) prevKeyArr[i] = Atomics.load(inputArr, i);
+        Atomics.store(ctrl, 0, STATE_EXT_WAIT);
+        Atomics.wait(ctrl, 0, STATE_EXT_WAIT);
+        if (Atomics.load(ctrl, 0) === STATE_ABORT) throw new AbortExecution();
+        renderer.beginFrame();
+      },
+
+      end_frame: () => {
+        if (!renderer) return;
+        const bitmap = renderer.endFrame();
+        self.postMessage({ type: 'frame', bitmap }, [bitmap]);
+        _lastFrameMs    = performance.now() - _lastFrameStart;
+        _lastFrameStart = performance.now();
+      },
+
+      window_should_close: () => 0,  // always false in v1 (web)
+
+      get_screen_w: () => renderer?.w ?? 0,
+      get_screen_h: () => renderer?.h ?? 0,
+
+      get_frame_time: () => _lastFrameMs / 1000.0,
+
+      // ── Drawing ──────────────────────────────────────────────────────────
+      clear_background:  (color)                    => renderer?.clearBackground(color),
+      draw_rect:         (x, y, w, h, color)        => renderer?.drawRect(x, y, w, h, color),
+      draw_rect_outline: (x, y, w, h, thick, color) => renderer?.drawRectOutline(x, y, w, h, thick, color),
+      draw_line:         (x0, y0, x1, y1, color)    => renderer?.drawLine(x0, y0, x1, y1, color),
+      draw_circle:       (cx, cy, r, color)          => renderer?.drawCircle(cx, cy, r, color),
+
+      // ── Input — keyboard ─────────────────────────────────────────────────
+      is_key_down: (k) => {
+        if (!inputArr || k < 0 || k >= 128) return 0;
+        return (Atomics.load(inputArr, k >> 5) >>> (k & 31)) & 1;
+      },
+      is_key_pressed: (k) => {
+        if (!inputArr || k < 0 || k >= 128) return 0;
+        const word = k >> 5, bit = k & 31;
+        const down = (Atomics.load(inputArr, word) >>> bit) & 1;
+        const prev = (prevKeyArr[word] >>> bit) & 1;
+        return (down & ~prev) & 1;
+      },
+
+      // ── Input — mouse ────────────────────────────────────────────────────
+      get_mouse_x:      () => inputArr ? Atomics.load(inputArr, 4) : 0,  // word 4 = bytes 16-19
+      get_mouse_y:      () => inputArr ? Atomics.load(inputArr, 5) : 0,  // word 5 = bytes 20-23
+      is_mouse_btn_down: (btn) => {
+        if (!inputArr || btn < 0 || btn > 2) return 0;
+        return (Atomics.load(inputArr, 6) >>> btn) & 1;  // word 6 = bytes 24-27
+      },
+    },
     env: {
       write_utf8: (ptr, len) => {
         if (!wasmMemory) return;
@@ -83,12 +170,12 @@ self.onmessage = async ({ data }) => {
     importObject.dbg = {
       brk: (stmtId) => {
         if (stepMode === 'continue' && !breakpoints.has(stmtId)) return;
-        Atomics.store(ctrl, 0, STATE_PAUSE);
+        Atomics.store(ctrl, 0, STATE_DBG_PAUSE);
         self.postMessage({ type: 'pause', stmtId });
-        Atomics.wait(ctrl, 0, STATE_PAUSE);
+        Atomics.wait(ctrl, 0, STATE_DBG_PAUSE);
         const cmd = Atomics.load(ctrl, 0);
         if (cmd === STATE_ABORT) throw new AbortExecution();
-        stepMode = (cmd === STATE_STEP) ? 'step' : 'continue';
+        stepMode = (cmd === STATE_DBG_STEP) ? 'step' : 'continue';
         Atomics.store(ctrl, 0, STATE_IDLE);
       },
     };

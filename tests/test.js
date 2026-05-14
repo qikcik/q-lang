@@ -21,4 +21,4 @@ import './test-ide-smoke.js';
 import './test-vfs.js';
 import { summarize } from './helpers.js';
 
-summarize();
+await summarize();

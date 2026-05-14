@@ -95,7 +95,7 @@ export function buildWAT(ast, { debug = false } = {}) {
   }
 
   // ── memory + shadow-stack global ──────────────────────────────────────────
-  b.push(['memory', 1]);
+  b.push(['memory', 4]);
   b.push(['global', '$__sp', ['mut', 'i32'], ['i32.const', HEAP_BASE]]);
 
   // ── table + elem ───────────────────────────────────────────────────────────

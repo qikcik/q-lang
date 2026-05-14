@@ -133,6 +133,21 @@ test('namespace alias resolves', () => {
   assert(ast !== null);
 });
 
+test('namespace-level var from literal is allowed', () => {
+  const { ast } = compile(
+    'cfg := namespace; cfg::SCALE := 256; main := fn() i32 { return cfg::SCALE; };'
+  );
+  assert(ast !== null);
+});
+
+test('namespace-level var from non-literal is rejected (hard stop)', () => {
+  assertThrows(
+    () => compile('cfg := namespace; cfg::SCALE := 128 + 128; main := fn() i32 { return cfg::SCALE; };'),
+    TypeError,
+    'Namespace-level variable',
+  );
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // CODEGEN — NamespacedDecl
 // ─────────────────────────────────────────────────────────────────────────────
@@ -783,6 +798,44 @@ test('liveCompileMulti: x : m::Unknown — unknown qualified type is reported (n
   assert(result.typeErrors.length > 0, 'should report error for unknown qualified type');
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Bug E2 — extern! (VarDecl with _isRuntimeImport) from imported file must
+// appear in merged AST and therefore in the WASM import section.
+// ─────────────────────────────────────────────────────────────────────────────
+
+suite('Bug E2 — extern! in imported namespace file reaches WASM import section');
+
+test('compileMulti: extern! from imported file present in merged AST', () => {
+  const gfxSrc = [
+    'draw_rect : fn(x: i32, y: i32, w: i32, h: i32, color: i32) void = extern!("gfx.draw_rect");',
+  ].join('\n');
+  const mainSrc = [
+    'gfx := import "gfx.qlang";',
+    'main := fn() void { gfx::draw_rect(0, 0, 10, 10, 0xFF0000FF); };',
+  ].join('\n');
+  const { ast } = compileMulti(mainSrc, name => name === 'gfx.qlang' ? gfxSrc : null);
+  // After fix: merged AST body must contain a VarDecl with _isRuntimeImport = true
+  const hasExtern = ast.body.some(d =>
+    (d.kind === 'VarDecl' && d._isRuntimeImport) ||
+    (d.kind === 'NamespacedDecl' && d.inner?._isRuntimeImport)
+  );
+  assert(hasExtern, 'merged AST must include extern! VarDecl from imported file');
+});
+
+test('compileMulti: extern! from imported file produces WASM import section entry', () => {
+  const gfxSrc = [
+    'draw_rect : fn(x: i32, y: i32, w: i32, h: i32, color: i32) void = extern!("gfx.draw_rect");',
+  ].join('\n');
+  const mainSrc = [
+    'gfx := import "gfx.qlang";',
+    'main := fn() void { gfx::draw_rect(0, 0, 10, 10, 0xFF0000FF); };',
+  ].join('\n');
+  const { ast } = compileMulti(mainSrc, name => name === 'gfx.qlang' ? gfxSrc : null);
+  const { wasmImports } = generate(ast);
+  const hasGfxImport = wasmImports.some(imp => imp.module === 'gfx' && imp.field === 'draw_rect');
+  assert(hasGfxImport, 'WASM import section must contain gfx.draw_rect from imported file');
+});
+
 test('compileMulti + generate: x : m::Vec2 = m::Vec2::of(2,3) — WASM returns x.x = 2', async () => {
   const main = [
     'm := import "math.qlang";',
@@ -796,7 +849,7 @@ test('compileMulti + generate: x : m::Vec2 = m::Vec2::of(2,3) — WASM returns x
 
 test('compileMulti + generate: fn param v: m::Vec2 — WASM returns correct field', async () => {
   const main = [
-    'm := namespace "math.qlang";',
+    'm := import "math.qlang";',
     'getX := fn(v: m::Vec2) i32 { return v.x; };',
     'main := fn() i32 { p : m::Vec2 = m::Vec2::of(7, 8); return getX(p); };',
   ].join('\n');
@@ -804,6 +857,31 @@ test('compileMulti + generate: fn param v: m::Vec2 — WASM returns correct fiel
   const { bytes } = generate(ast);
   const { instance } = await WebAssembly.instantiate(bytes, WASM_ENV);
   assertEq(instance.exports.main(), 7);
+});
+
+test('compileMulti + generate: imported const (colors::WHITE) returns value', async () => {
+  const colors = [
+    'WHITE := 1234;',
+  ].join('\n');
+  const main = [
+    'colors := import "colors.qlang";',
+    'main := fn() i32 { return colors::WHITE; };',
+  ].join('\n');
+  const { ast } = compileMulti(main, makeGetFile({ 'colors.qlang': colors }));
+  const { bytes } = generate(ast);
+  const { instance } = await WebAssembly.instantiate(bytes, WASM_ENV);
+  assertEq(instance.exports.main(), 1234);
+});
+
+test('compile + generate: same-file global const read returns value', async () => {
+  const src = [
+    'SCALE := 256;',
+    'main := fn() i32 { return SCALE; };',
+  ].join('\n');
+  const { ast } = compile(src);
+  const { bytes } = generate(ast);
+  const { instance } = await WebAssembly.instantiate(bytes, WASM_ENV);
+  assertEq(instance.exports.main(), 256);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

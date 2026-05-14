@@ -465,6 +465,9 @@ Jest to **core feature** kompilatora — wbudowany w fazę type-checkingu:
 
 > **Podwójny `mut` na tablicach**: Outer `mut` (binding) i inner `mut` (elementy) to dwa niezależne poziomy. Dla tablic statycznych (`array<T, N>`) outer `mut` pozwala na nadpisanie całej tablicy (`arr = {new, values}`). Mechanika ta będzie kluczowa przy przyszłych wektorach (dynamic arrays), gdzie outer `mut` pozwoli na `push`/`pop`/`resize`, a inner `mut` kontroluje zapis przez indeks.
 
+- **Top-level restriction:** `VarDecl` na top-level (plain lub namespaced) nie może mieć `mut`. V1 dopuszcza tylko const bindings; dla namespaced top-level bindingów inicjalizator musi być bezpośrednim literałem.
+- Top-level / imported consty z bezpośrednich literałów dostają metadane compile-time i mogą być emitowane jako natychmiastowe stałe przy odczycie przez `Identifier` lub `QualifiedName`.
+
 - Shadowing jest **błędem** — ta sama nazwa w tym samym lub zewnętrznym scope → `TypeError`
 - `Scope.define(name, type, kind, mut, line)` sprawdza `symbols` i wszystkie parent-scopes
 - Przypisanie do zmiennej const (`sym.mut === false`) → `TypeError`: `Cannot assign to const variable`
@@ -533,7 +536,9 @@ Główny punkt wejścia dla kompilacji multi-file.
 | Per-file typecheck | Każdy plik type-checkowany niezależnie z `_filePrefix` (np. `__f_math_qlang`) — prefiks zapewnia unikalne nazwy WASM globals/functions |
 | `importEnv: Map<filename, { scope, ast }>` | Wynik per-file typecheck; mapuje nazwę pliku na scope i typed AST |
 | TypeChecker Pass 0 głównego pliku | `mountNamespace(alias, importEnv[filename].scope)` — montuje scope importowanego pliku jako sub-namespace pod aliasem |
-| Merge AST | `importedBodies` (FuncDecl + NamespacedDecl z importowanych plików) dołączane do `ast.body` głównego pliku przed codegen |
+| Merge AST | `importedBodies` (FuncDecl + NamespacedDecl + runtime-import `VarDecl`) dołączane do `ast.body` głównego pliku przed codegen |
+
+**Imported const semantics:** jeżeli importowany plik deklaruje top-level const z bezpośredniego literału (`WHITE := 0xFFFFFFFF;`, `cfg::SCALE := 256;`), binding dostaje metadane compile-time w per-file typecheck. Odczyt przez alias namespace (`colors::WHITE`) emituje literał bez tworzenia runtime globala.
 
 ### `liveCompileMulti(src, getFile)`
 

@@ -1,0 +1,172 @@
+// examples/pong.qlang — Pong
+//
+// Import this file together with gfx.qlang, keys.qlang, colors.qlang:
+//   files: ["pong.qlang", "gfx.qlang", "keys.qlang", "colors.qlang"]
+//
+// Demonstrates:
+//   gfx := import "gfx.qlang"   — multi-file import
+//   extern! host functions       — init_window, begin_frame, draw_rect, draw_circle
+//   struct + namespace           — Ball and Paddle structs
+//   ptr<mut T>                   — mutate Ball state through pointer
+//   while / if                   — main game loop + collision logic
+//   f32 positions + velocities   — frame-rate independent movement
+//   gfx::get_frame_time()        — delta time from host
+//   shared constants             — keys::KEY_A/KEY_D/KEY_ESC, colors::*
+//
+// Rules:
+//   - Move paddle with A / D.
+//   - Ball bounces off walls and paddle.
+//   - If ball misses paddle and reaches bottom edge, round restarts.
+
+gfx    := import "gfx.qlang";
+keys   := import "keys.qlang";
+colors := import "colors.qlang";
+
+W     := 640;
+H     := 480;
+
+BALL_R := 10;
+
+PADDLE_W      := 120;
+PADDLE_H      := 14;
+PADDLE_Y      := 448;
+PADDLE_SPEED  := 420;
+
+BALL_SPEED_X  := 220;
+BALL_SPEED_Y  := 240;
+MAX_BALL_VX   := 700;
+SPIN_FACTOR   := 4;
+
+// ── Ball struct ───────────────────────────────────────────────────────────────
+
+Ball := struct {
+    x  : mut f32;   // position-x in pixels
+    y  : mut f32;   // position-y in pixels
+    vx : mut f32;   // velocity-x in pixels / second
+    vy : mut f32;   // velocity-y in pixels / second
+};
+
+Paddle := struct {
+    x : mut f32;    // paddle center-x in pixels
+};
+
+// ── Ball / Paddle init ───────────────────────────────────────────────────────
+
+Ball::reset := fn(b: ptr<mut Ball>) void {
+    b.*.x  = as<f32>(W / 2);
+    b.*.y  = as<f32>(H / 2);
+    b.*.vx = as<f32>(BALL_SPEED_X);
+    b.*.vy = as<f32>(BALL_SPEED_Y);
+};
+
+Paddle::reset := fn(p: ptr<mut Paddle>) void {
+    p.*.x = as<f32>(W / 2);
+};
+
+// ── Paddle update ─────────────────────────────────────────────────────────────
+
+Paddle::update := fn(p: ptr<mut Paddle>, dt: f32) void {
+    step : f32 = as<f32>(PADDLE_SPEED) * dt;
+    if (gfx::is_key_down(keys::KEY_A)) { p.*.x = p.*.x - step; }
+    if (gfx::is_key_down(keys::KEY_D)) { p.*.x = p.*.x + step; }
+
+    minX : f32 = as<f32>(PADDLE_W / 2);
+    maxX : f32 = as<f32>(W - (PADDLE_W / 2));
+    if (p.*.x < minX) { p.*.x = minX; }
+    if (p.*.x > maxX) { p.*.x = maxX; }
+};
+
+// ── Ball update (walls only, bottom handled by game rule) ───────────────────
+
+Ball::update := fn(b: ptr<mut Ball>, dt: f32) void {
+    b.*.x = b.*.x + b.*.vx * dt;
+    b.*.y = b.*.y + b.*.vy * dt;
+
+    leftEdge  : f32 = as<f32>(BALL_R);
+    rightEdge : f32 = as<f32>(W - BALL_R);
+    topEdge   : f32 = as<f32>(BALL_R);
+
+    // Left wall
+    if (b.*.x < leftEdge) {
+        b.*.x  = leftEdge;
+        b.*.vx = -b.*.vx;
+    }
+    // Right wall
+    if (b.*.x > rightEdge) {
+        b.*.x  = rightEdge;
+        b.*.vx = -b.*.vx;
+    }
+    // Top wall
+    if (b.*.y < topEdge) {
+        b.*.y  = topEdge;
+        b.*.vy = -b.*.vy;
+    }
+};
+
+// ── Draw ─────────────────────────────────────────────────────────────────────
+
+Ball::draw := fn(b: ptr<mut Ball>) void {
+    px := as<i32>(b.*.x);
+    py := as<i32>(b.*.y);
+    gfx::draw_circle(px, py, BALL_R, colors::ORANGE);
+};
+
+Paddle::draw := fn(p: ptr<mut Paddle>) void {
+    left := as<i32>(p.*.x) - (PADDLE_W / 2);
+    gfx::draw_rect(left, PADDLE_Y, PADDLE_W, PADDLE_H, colors::WHITE);
+};
+
+// ── main — game loop ──────────────────────────────────────────────────────────
+
+main := fn() void {
+    gfx::init_window(W, H);
+
+    ball : Ball          = Ball::default;
+    bp   : ptr<mut Ball> = &ball;
+    Ball::reset(bp);
+
+    paddle : Paddle          = Paddle::default;
+    pp     : ptr<mut Paddle> = &paddle;
+    Paddle::reset(pp);
+
+    while (!gfx::window_should_close()) {
+        if (gfx::is_key_pressed(keys::KEY_ESC)) { break; }
+
+        gfx::begin_frame();
+        dt := gfx::get_frame_time();
+
+        Paddle::update(pp, dt);
+        Ball::update(bp, dt);
+
+        // Paddle collision (only when ball goes downward)
+        paddleTop    : f32 = as<f32>(PADDLE_Y);
+        paddleBottom : f32 = as<f32>(PADDLE_Y + PADDLE_H);
+        paddleHalfW  : f32 = as<f32>(PADDLE_W / 2);
+        ballBottom   : f32 = bp.*.y + as<f32>(BALL_R);
+        ballTop      : f32 = bp.*.y - as<f32>(BALL_R);
+
+        if (bp.*.vy > as<f32>(0) && ballBottom >= paddleTop && ballTop <= paddleBottom) {
+            if (bp.*.x >= pp.*.x - paddleHalfW && bp.*.x <= pp.*.x + paddleHalfW) {
+                bp.*.y  = paddleTop - as<f32>(BALL_R);
+                bp.*.vy = -bp.*.vy;
+
+                // Add a bit of horizontal spin based on hit offset from paddle center
+                hitOffset : f32 = bp.*.x - pp.*.x;
+                bp.*.vx = bp.*.vx + hitOffset * as<f32>(SPIN_FACTOR);
+                if (bp.*.vx > as<f32>(MAX_BALL_VX)) { bp.*.vx = as<f32>(MAX_BALL_VX); }
+                if (bp.*.vx < -as<f32>(MAX_BALL_VX)) { bp.*.vx = -as<f32>(MAX_BALL_VX); }
+            }
+        }
+
+        // Missed paddle: once ball reaches bottom edge, restart round
+        if (ballBottom >= as<f32>(H)) {
+            Ball::reset(bp);
+            Paddle::reset(pp);
+        }
+
+        gfx::clear_background(colors::BLACK);
+        Ball::draw(bp);
+        Paddle::draw(pp);
+        gfx::end_frame();
+    }
+};

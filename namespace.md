@@ -1,6 +1,6 @@
 # QLang — Namespace Plan
 
-> Status: **ZAIMPLEMENTOWANE** — archiwum decyzji projektowych. Zob. [langDetail.md](langDetail.md) §13 i §10 ograniczenia. Namespace'd variables (`std::BAR := 42;`) — parser obsługuje, codegen/typechecker deferred do v2. **Namespace file imports** (`x := namespace "file.qlang"`) — zaimplementowane: `NamespaceImport` AST node, `compileMulti`, `liveCompileMulti`, per-file typecheck z `_filePrefix`, autocomplete przez `importEnv`.
+> Status: **ZAIMPLEMENTOWANE** — archiwum decyzji projektowych. Zob. [langDetail.md](langDetail.md) §13 i §10 ograniczenia. Namespace'd variables są dziś wspierane tylko jako **const-only literal bindings** (`std::BAR := 42;`), bez runtime globals i bez `mut`. **Namespace file imports** (`x := namespace "file.qlang"`) — zaimplementowane: `NamespaceImport` AST node, `compileMulti`, `liveCompileMulti`, per-file typecheck z `_filePrefix`, autocomplete przez `importEnv`, odczyt importowanych constów literalnych.
 
 ---
 
@@ -54,7 +54,7 @@ Player::default               // zero-init
 
 // User może dołożyć:
 Player::kill := fn(p: ptr<mut Player>) void { p.*.hp = 0; };
-Player::count : mut i32 = 0;  // "static" variable
+Player::MAX_HP := 100;        // compile-time const w namespace struktury
 ```
 
 ### 3.4 Użycie
@@ -167,7 +167,7 @@ Nie ma `TypeConstructorExpr`.
 | Scalar constructor | `'scalar-constructor'` | `i32::of(3.7)`, `f64::default` |
 | Struct constructor | `'struct-constructor'` | `Player::of(1,2)`, `Player::default` |
 | Namespace function | `'namespace-func'` | `std::foo()`, `Player::kill(p)` |
-| Namespace variable | `'namespace-var'` | `Player::count`, `std::BAR` |
+| Namespace const | `'namespace-const'` | `Player::MAX_HP`, `std::BAR`, `colors::WHITE` |
 
 ### 5.4 Codegen dispatch
 
@@ -177,7 +177,7 @@ case 'QualifiedName':
         case 'struct-constructor':  return emitStructConstructor(b, expr, ctx);
         case 'scalar-constructor':  return emitScalarConstructor(b, expr, ctx);
         case 'namespace-func':      // → emitExpr on CallExpr wrapper or direct call
-        case 'namespace-var':       // → global.get / local.get z mangled name
+        case 'namespace-const':     // → emit immediate const, bez runtime global
     }
 ```
 
@@ -418,9 +418,10 @@ Namespace'd functions w WASM:
 
 funcIndex mapa: klucz = mangled name string.
 
-Namespace'd globals (np. `Player::count`):
-- WASM global `$Player__count`
-- QualifiedName z `_resolvedKind: 'namespace-var'` → `global.get $Player__count` / `global.set`
+Namespace-level consts (np. `Player::MAX_HP`, `colors::WHITE`):
+- brak osobnego WASM globala runtime
+- `QualifiedName` z `_resolvedKind: 'namespace-const'` → bezpośredni emit literału podczas codegenu
+- inicjalizator musi być bezpośrednim literałem; brak `global.set`, brak mutowalności
 
 ---
 
@@ -454,7 +455,8 @@ Namespace'd globals (np. `Player::count`):
 - Brak private/public — wszystko publiczne
 - Brak metod na strukturach (fn z implicit `self`) — tylko "static functions" w namespace
 - `void` pozostaje keyword (nie namespace-owalny)
-- Brak namespace'd variables (WASM globals) — `std::BAR := 42;` parsuje się poprawnie, ale typechecker nie rejestruje w namespace scope, codegen nie emituje `global.get`/`global.set`. Deferred do v2.
+- Namespace-level bindings są dziś ograniczone do constów z bezpośredniego literału. `mut` na top-level jest odrzucany; brak runtime WASM globals dla namespace state.
+- Importowany odczyt constów działa tylko dla tych literalnych bindingów; brak ogólnego const-eval dla złożonych wyrażeń.
 
 ---
 
@@ -516,7 +518,7 @@ node('QualifiedTypeRef', {
 | NamespaceDecl (`std := namespace;`) | ✅ Done | Parser + typechecker Pass 0 |
 | Namespace alias (`gfx := namespace Engine::Graphics;`) | ✅ Done | Parser + typechecker alias expansion |
 | NamespacedDecl + FuncDecl (`std::foo := fn()`) | ✅ Done | Parser + typechecker (mangled names) + codegen |
-| NamespacedDecl + VarDecl (`std::BAR := 42;`) | ⬜ v2 | Parser obsługuje, brak: namespace scope registration + WASM globals |
+| NamespacedDecl + VarDecl (`std::BAR := 42;`) | ✅ Done (Pareto) | Const-only, literal-only, bez runtime WASM globals; odczyt lokalny i importowany działa |
 | Struct auto-namespace (`Player::of`, `Player::default`) | ✅ Done | checkStructDecl tworzy namespace automatycznie |
 | Scalar namespaces (`i32::of`, `i32::default`) | ✅ Done | `_registerBuiltins()` |
 | Scope.namespaces + resolveQualified | ✅ Done | staticAnalysis.js |

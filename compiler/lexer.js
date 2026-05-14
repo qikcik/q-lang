@@ -85,6 +85,13 @@ export function tokenize(src) {
       let raw = '';
       const startPos = pos;
       while (pos < src.length && isDigitOrUnderscore(peek())) raw += advance();
+      // hex literal: 0x... or 0X...
+      if (raw === '0' && (peek() === 'x' || peek() === 'X')) {
+        raw += advance(); // consume 'x'
+        while (pos < src.length && isHexDigit(peek())) raw += advance();
+        tokens.push({ type: TT.NUMBER, value: raw, line: startLine, col: startCol, start: startPos, end: pos });
+        continue;
+      }
       if (peek() === '.' && isDigit(peek(1))) {
         raw += advance(); // consume '.'
         while (pos < src.length && isDigitOrUnderscore(peek())) raw += advance();
@@ -266,6 +273,7 @@ export function tokenize(src) {
 
 function isDigit(ch) { return ch >= '0' && ch <= '9'; }
 function isDigitOrUnderscore(ch) { return (ch >= '0' && ch <= '9') || ch === '_'; }
+function isHexDigit(ch) { return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F'); }
 function isAlpha(ch) { return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch === '_'; }
 function isAlphaNum(ch) { return isAlpha(ch) || isDigit(ch); }
 

@@ -8,5 +8,9 @@
   { "name": "Showcase",             "file": "showcase.qlang",           "main": "showcase.qlang",           "files": ["showcase.qlang"] },
   { "name": "Hangman",              "file": "hangman.qlang",            "main": "hangman.qlang",            "files": ["hangman.qlang"] },
   { "name": "Sokoban",              "file": "sokoban.qlang",            "main": "sokoban.qlang",            "files": ["sokoban.qlang"] },
-  { "name": "Namespaces",           "file": "namespaces/main.qlang",    "main": "namespaces/main.qlang",    "files": ["namespaces/main.qlang", "namespaces/math.qlang"] }
+  { "name": "Namespaces",           "file": "namespaces/main.qlang",    "main": "namespaces/main.qlang",    "files": ["namespaces/main.qlang", "namespaces/math.qlang"] },
+  { "name": "Pong",                  "file": "pong.qlang",              "main": "pong.qlang",              "files": ["pong.qlang", "gfx.qlang", "keys.qlang", "colors.qlang"] },
+  { "name": "GFX API (graphics)",   "file": "gfx.qlang",               "main": "gfx.qlang",               "files": ["gfx.qlang"] },
+  { "name": "Key constants",        "file": "keys.qlang",              "main": "keys.qlang",              "files": ["keys.qlang"] },
+  { "name": "Color constants",      "file": "colors.qlang",            "main": "colors.qlang",            "files": ["colors.qlang"] }
 ]

@@ -60,6 +60,9 @@ export class TypeInferBase {
     const sym  = this.scope.resolve(expr.name, expr.line);
     expr._type = sym.type;
     expr._mut  = sym.mut;
+    if (sym.kind === 'var' && sym.type?._constValue !== undefined) {
+      expr._constValue = sym.type._constValue;
+    }
     return sym.type;
   }
 
@@ -157,7 +160,7 @@ export class TypeInferBase {
     if (expr.op === '-') {
       const t = this.inferExpr(expr.operand);
       const name = t?.name;
-      if (!name || !['i32', 'u8', 'u16', 'u32', 'f64'].includes(name))
+      if (!name || !['i32', 'u8', 'u16', 'u32', 'f32', 'f64'].includes(name))
         throw new TypeError(`'-' operator requires numeric type, got '${typeStr(t)}'`, expr);
       expr._type = t;
       return t;
@@ -511,6 +514,26 @@ export class TypeInferBase {
       }
       expr._type = funcType.returnType;
       return funcType.returnType;
+    }
+
+    // ── namespace constant read (colors::WHITE, cfg::SCALE, etc.) ─────
+    if (sym.kind === 'var') {
+      if (args && args.length > 0) {
+        throw new TypeError(
+          `'${segments.join('::')}' is a variable, not a function`,
+          expr,
+        );
+      }
+      if (resolved?._constValue === undefined) {
+        throw new TypeError(
+          `'${segments.join('::')}' is not a compile-time constant`,
+          expr,
+        );
+      }
+      expr._resolvedKind = 'namespace-const';
+      expr._constValue   = resolved._constValue;
+      expr._type         = resolved;
+      return resolved;
     }
 
     throw new TypeError(

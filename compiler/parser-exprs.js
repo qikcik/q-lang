@@ -292,7 +292,7 @@ export class ParserExprs extends ParserBase {
     if (t.type === TT.NUMBER) {
       this.pos++;
       const isFloat = t.value.includes('.');
-      return node('Literal', { value: isFloat ? parseFloat(t.value) : parseInt(t.value, 10), isFloat, line: t.line, start: t.start, end: t.end });
+      return node('Literal', { value: Number(t.value), isFloat, line: t.line, start: t.start, end: t.end });
     }
 
     if (t.type === TT.BOOL_LIT) {

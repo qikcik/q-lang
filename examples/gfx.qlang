@@ -1,0 +1,38 @@
+// examples/gfx.qlang — Game graphics API (extern! bindings for gfx module)
+//
+// Usage: gfx := import "gfx.qlang";
+//
+// All colors: packed RGBA_8888 as i32 — 0xRRGGBBAA
+//   pack: color := (r << 24) | (g << 16) | (b << 8) | a;
+//   use constants from colors.qlang: RED, GREEN, BLUE, WHITE, BLACK, YELLOW, CYAN
+//
+// Coordinates: pixel (0,0) = top-left
+
+// ── Window / Frame ────────────────────────────────────────────────────────────
+init_window         : fn(w: i32, h: i32) void           = extern!("gfx.init_window");
+begin_frame         : fn() void                          = extern!("gfx.begin_frame");
+end_frame           : fn() void                          = extern!("gfx.end_frame");
+window_should_close : fn() bool                          = extern!("gfx.window_should_close");
+get_screen_w        : fn() i32                           = extern!("gfx.get_screen_w");
+get_screen_h        : fn() i32                           = extern!("gfx.get_screen_h");
+
+// ── Drawing ───────────────────────────────────────────────────────────────────
+clear_background    : fn(color: i32) void                = extern!("gfx.clear_background");
+draw_rect           : fn(x: i32, y: i32, w: i32, h: i32, color: i32) void              = extern!("gfx.draw_rect");
+draw_rect_outline   : fn(x: i32, y: i32, w: i32, h: i32, thick: i32, color: i32) void = extern!("gfx.draw_rect_outline");
+draw_line           : fn(x0: i32, y0: i32, x1: i32, y1: i32, color: i32) void         = extern!("gfx.draw_line");
+draw_circle         : fn(cx: i32, cy: i32, r: i32, color: i32) void                    = extern!("gfx.draw_circle");
+
+// ── Input — keyboard ──────────────────────────────────────────────────────────
+// key codes: see keys.qlang
+is_key_down         : fn(key: i32) bool                  = extern!("gfx.is_key_down");
+is_key_pressed      : fn(key: i32) bool                  = extern!("gfx.is_key_pressed");
+
+// ── Input — mouse ─────────────────────────────────────────────────────────────
+get_mouse_x         : fn() i32                           = extern!("gfx.get_mouse_x");
+get_mouse_y         : fn() i32                           = extern!("gfx.get_mouse_y");
+is_mouse_btn_down   : fn(btn: i32) bool                  = extern!("gfx.is_mouse_btn_down");
+
+// ── Time ──────────────────────────────────────────────────────────────────────
+// Returns seconds elapsed since last frame (e.g. 0.0167 at 60fps)
+get_frame_time      : fn() f32                           = extern!("gfx.get_frame_time");

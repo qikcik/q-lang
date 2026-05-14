@@ -141,7 +141,8 @@ export function compileMulti(src, getFile) {
   const importedBodies = [];
   for (const entry of importEnv.values()) {
     for (const decl of entry.ast.body) {
-      if (decl.kind === 'FuncDecl' || decl.kind === 'NamespacedDecl') importedBodies.push(decl);
+      if (decl.kind === 'FuncDecl' || decl.kind === 'NamespacedDecl'
+          || (decl.kind === 'VarDecl' && decl._isRuntimeImport)) importedBodies.push(decl);
     }
   }
   const mergedAst = importedBodies.length > 0

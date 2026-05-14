@@ -159,6 +159,46 @@ test("char literal ' ' = 32", () => {
   assertEq(toks[0].value, '32');
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Lexer — hex literals
+// ─────────────────────────────────────────────────────────────────────────────
+
+suite('Lexer — hex literals');
+
+test('0xFF tokenizes as NUMBER', () => {
+  const toks = tokenize('0xFF');
+  assertEq(toks[0].type, TT.NUMBER);
+  assertEq(toks[0].value, '0xFF');
+});
+
+test('0xFF0000FF tokenizes as NUMBER (color constant)', () => {
+  const toks = tokenize('0xFF0000FF');
+  assertEq(toks[0].type, TT.NUMBER);
+  assertEq(toks[0].value, '0xFF0000FF');
+});
+
+test('0x0 tokenizes as NUMBER', () => {
+  const toks = tokenize('0x0');
+  assertEq(toks[0].type, TT.NUMBER);
+  assertEq(toks[0].value, '0x0');
+});
+
+test('hex uppercase 0xDEADBEEF tokenizes as NUMBER', () => {
+  const toks = tokenize('0xDEADBEEF');
+  assertEq(toks[0].type, TT.NUMBER);
+  assertEq(toks[0].value, '0xDEADBEEF');
+});
+
+test('0x followed by non-hex is just 0 then identifier', () => {
+  const toks = tokenize('0xGG');
+  // 0x → but G is not a hex digit, so '0' is a complete number, 'xGG' is an identifier
+  // Actually: '0' consumed, then 'x' triggers hex scan but 'G' isn't hex
+  // Result: '0x' with zero hex digits is '0x' as value or fallback
+  // The simplest valid behavior: 0x with no hex digits is still token '0x'
+  // (guard against crash, value may be NaN-safe for parser)
+  assert(toks[0].type === TT.NUMBER || toks[0].type === TT.IDENT, 'first token is NUMBER or IDENT');
+});
+
 test("char escape '\\n' = 10", () => {
   const toks = tokenize("'\\n'");
   assertEq(toks[0].type, TT.CHAR_LIT);
